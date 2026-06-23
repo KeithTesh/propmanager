@@ -26,6 +26,7 @@ export function getRedis(): Redis {
         return Math.min(times * 200, 2000);
       },
       lazyConnect: false,
+      family: 4, // some hosts resolve IPv6 first; force IPv4 to avoid ETIMEDOUT on IPv6-less networks
     });
 
     _redis.on('error', (err) => logger.error({ err }, 'Redis error'));
