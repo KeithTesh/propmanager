@@ -1,0 +1,10 @@
+{
+  "name": "PropManager Caretaker",
+  "short_name": "Caretaker",
+  "description": "PropManager caretaker portal",
+  "start_url": "/caretaker",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0d9f9f",
+  "orientation": "portrait"
+}

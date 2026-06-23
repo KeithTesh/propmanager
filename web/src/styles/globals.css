@@ -1,0 +1,58 @@
+/* web/src/styles/globals.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background:   0 0% 100%;
+    --foreground:   222 47% 11%;
+    --card:         0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover:      0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary:      178 87% 34%;    /* brand-500 teal */
+    --primary-foreground: 0 0% 100%;
+    --secondary:    210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
+    --muted:        210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+    --accent:       38 92% 50%;     /* amber accent */
+    --accent-foreground: 222 47% 11%;
+    --destructive:  0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border:       214 32% 91%;
+    --input:        214 32% 91%;
+    --ring:         178 87% 34%;
+    --radius:       0.5rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+
+  /* Kenya shilling formatting helper */
+  .kes-amount {
+    @apply font-mono tabular-nums;
+  }
+}
+
+@layer utilities {
+  /* Fade in animation for page transitions */
+  .animate-in {
+    @apply animate-fade-in;
+  }
+
+  /* Status badge variants */
+  .badge-paid      { @apply bg-emerald-100 text-emerald-800; }
+  .badge-open      { @apply bg-blue-100 text-blue-800; }
+  .badge-overdue   { @apply bg-red-100 text-red-800; }
+  .badge-partial   { @apply bg-amber-100 text-amber-800; }
+  .badge-draft     { @apply bg-gray-100 text-gray-600; }
+  .badge-waived    { @apply bg-purple-100 text-purple-800; }
+  .badge-pending   { @apply bg-yellow-100 text-yellow-800; }
+}
