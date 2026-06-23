@@ -641,8 +641,8 @@ footer{background:#060f1e;color:rgba(255,255,255,.5);padding:60px 24px 32px}
 <script>
 (function(){
   var isDevSite = location.hostname === 'localhost' && location.port === '5000';
-  var APP = isDevSite ? 'http://localhost:3000' : '';
-  var API = isDevSite ? 'http://localhost:4000' : '';
+  var APP = isDevSite ? 'http://localhost:3000' : 'https://propmanager-sigma-six.vercel.app';
+  var API = isDevSite ? 'http://localhost:4000' : 'https://propmanager-6yuw.onrender.com';
 
   function goToApp(path){ location.href = APP + path; }
   function openModal(){  document.getElementById('signupModal').classList.add('open'); }
