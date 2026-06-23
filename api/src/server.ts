@@ -219,19 +219,23 @@ process.on('unhandledRejection', (reason) => { logger.fatal({ reason }, 'Unhandl
 
 start();
 
-// ─── MARKETING WEBSITE SERVER (dev: port 5000, prod: use nginx/CDN) ──────────
+// ─── MARKETING WEBSITE SERVER (dev only — port 5000) ─────────────────────────
 // Serves the static marketing site separately so it doesn't conflict with
 // the React app at localhost:3000. In production, host this on a CDN or
-// separate domain (e.g. propmanager.co.ke vs app.propmanager.co.ke)
+// separate domain (e.g. propmanager.co.ke vs app.propmanager.co.ke) — a second
+// listener here would confuse host platforms (Render etc.) that expect a
+// single bound port per service.
 
-const WEBSITE_PORT = Number(process.env.WEBSITE_PORT ?? 5000);
-const websiteApp = express();
-websiteApp.use(express.static(path.join(__dirname, '..', 'public')));
-websiteApp.get('*', (_req, res) => {
-  res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
-});
-websiteApp.listen(WEBSITE_PORT, () => {
-  logger.info({ port: WEBSITE_PORT }, 'Marketing website server started');
-});
+if (process.env.NODE_ENV !== 'production') {
+  const WEBSITE_PORT = Number(process.env.WEBSITE_PORT ?? 5000);
+  const websiteApp = express();
+  websiteApp.use(express.static(path.join(__dirname, '..', 'public')));
+  websiteApp.get('*', (_req, res) => {
+    res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
+  });
+  websiteApp.listen(WEBSITE_PORT, () => {
+    logger.info({ port: WEBSITE_PORT }, 'Marketing website server started');
+  });
+}
 
 export { app };
