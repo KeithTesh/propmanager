@@ -5,6 +5,7 @@ import { useNavigate, useLocation, Navigate } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
 import { apiClient, extractData, getApiErrorMessage } from '../../lib/api';
 import { queryClient } from '../../lib/queryClient';
+import { PasswordInput } from '../../components/ui/PasswordInput';
 import type { AuthUser, Company } from '../../types';
 
 interface LoginResponse {
@@ -277,13 +278,22 @@ function Field({ label, id, type, value, onChange, placeholder, required, autoCo
   onChange: (v: string) => void; placeholder: string;
   required?: boolean; autoComplete?: string;
 }) {
+  const inputCls = "w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-gray-900 placeholder-gray-400 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition";
+
   return (
     <div>
       <label htmlFor={id} className="block text-sm font-medium text-gray-700 mb-1.5">{label}</label>
-      <input id={id} type={type} autoComplete={autoComplete} required={required}
-        value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
-        className="w-full px-3.5 py-2.5 rounded-lg border border-gray-300 text-gray-900 placeholder-gray-400 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition"
-      />
+      {type === 'password' ? (
+        <PasswordInput id={id} autoComplete={autoComplete} required={required}
+          value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+          className={inputCls}
+        />
+      ) : (
+        <input id={id} type={type} autoComplete={autoComplete} required={required}
+          value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+          className={inputCls}
+        />
+      )}
     </div>
   );
 }

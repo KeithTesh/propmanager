@@ -741,6 +741,7 @@ footer{background:#060f1e;color:rgba(255,255,255,.5);padding:60px 24px 32px}
     try{
       var res=await fetch(API+'/api/v1/auth/register',{
         method:'POST',
+        credentials:'include',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({companyName:name,phone:phone,email:email,password:password,fullName:fullName,accountType:accountType})
       });
@@ -751,9 +752,10 @@ footer{background:#060f1e;color:rgba(255,255,255,.5);padding:60px 24px 32px}
       } else {
         document.getElementById('signupForm').style.display='none';
         document.getElementById('signupSuccess').style.display='block';
-        var tok=(data.data&&data.data.tokens&&data.data.tokens.accessToken)||'';
+        // The API just set a cross-site refresh cookie (credentials:'include' above) —
+        // the app's AuthBootstrap will pick up the session automatically on load.
         setTimeout(function(){
-          location.href=APP+'/setup'+(tok?'#token='+encodeURIComponent(tok):'');
+          location.href=APP+'/setup';
         },2000);
       }
     } catch(e){

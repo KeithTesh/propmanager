@@ -5,6 +5,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { apiClient, getApiErrorMessage } from '../lib/api';
 import { tokenStore } from '../lib/api';
+import { PasswordInput } from '../components/ui/PasswordInput';
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 
@@ -177,8 +178,8 @@ function Login({ onLogin }: { onLogin: (u: CaretakerUser) => void }) {
         <input value={email} onChange={e => setEmail(e.target.value)}
           type="email" placeholder="Email address" autoComplete="email"
           style={inputStyle} />
-        <input value={password} onChange={e => setPassword(e.target.value)}
-          type="password" placeholder="Password" autoComplete="current-password"
+        <PasswordInput value={password} onChange={e => setPassword(e.target.value)}
+          placeholder="Password" autoComplete="current-password"
           onKeyDown={e => e.key === 'Enter' && submit()}
           style={inputStyle} />
         {error && <p style={{ color: '#ef4444', fontSize: 13, margin: 0 }}>{error}</p>}
@@ -692,8 +693,8 @@ function ProfilePage({ user, onLogout }: { user: CaretakerUser; onLogout: () => 
       <div style={{ background: 'white', borderRadius: 16, padding: 16, boxShadow: '0 1px 3px rgba(0,0,0,0.06)', marginBottom: 14 }}>
         <p style={{ fontWeight: 600, fontSize: 14, margin: '0 0 12px', color: '#111827' }}>Change Password</p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <input type="password" value={oldPw} onChange={e => setOldPw(e.target.value)} placeholder="Current password" style={inputStyle} />
-          <input type="password" value={newPw} onChange={e => setNewPw(e.target.value)} placeholder="New password (min 8 chars)" style={inputStyle} />
+          <PasswordInput value={oldPw} onChange={e => setOldPw(e.target.value)} placeholder="Current password" style={inputStyle} />
+          <PasswordInput value={newPw} onChange={e => setNewPw(e.target.value)} placeholder="New password (min 8 chars)" style={inputStyle} />
           {error && <p style={{ color: '#ef4444', fontSize: 13, margin: 0 }}>{error}</p>}
           {msg   && <p style={{ color: '#059669', fontSize: 13, margin: 0 }}>{msg}</p>}
           <button onClick={changePassword} disabled={saving}

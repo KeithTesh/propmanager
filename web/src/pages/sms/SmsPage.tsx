@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient, getApiErrorMessage } from '../../lib/api';
 import { toast } from '../../components/ui/toaster';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
+import { PasswordInput } from '../../components/ui/PasswordInput';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -715,8 +716,7 @@ export default function SmsPage() {
                   </div>
                   <div className="sm:col-span-2">
                     <label className="block text-sm font-medium text-gray-700 mb-1">AT API Key</label>
-                    <input
-                      type="password"
+                    <PasswordInput
                       value={senderForm.atApiKey}
                       onChange={e => setSenderForm(f => ({ ...f, atApiKey: e.target.value }))}
                       placeholder="Your Africa's Talking API key"

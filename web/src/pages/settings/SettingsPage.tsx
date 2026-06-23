@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient, getApiErrorMessage } from '../../lib/api';
 import { toast } from '../../components/ui/toaster';
 import { useAuthStore } from '../../stores/authStore';
+import { PasswordInput } from '../../components/ui/PasswordInput';
 
 interface Company {
   id: string; name: string; trading_name: string | null;
@@ -424,15 +425,15 @@ export default function SettingsPage() {
         <div className="space-y-5">
           <Section title="Change Password">
             <Field label="Current Password">
-              <input type="password" value={passwords.current}
+              <PasswordInput value={passwords.current}
                 onChange={e => setPasswords(p => ({...p, current: e.target.value}))} className={inputCls} />
             </Field>
             <Field label="New Password">
-              <input type="password" value={passwords.newPass}
+              <PasswordInput value={passwords.newPass}
                 onChange={e => setPasswords(p => ({...p, newPass: e.target.value}))} className={inputCls} />
             </Field>
             <Field label="Confirm New Password">
-              <input type="password" value={passwords.confirm}
+              <PasswordInput value={passwords.confirm}
                 onChange={e => setPasswords(p => ({...p, confirm: e.target.value}))} className={inputCls} />
             </Field>
           </Section>
@@ -764,7 +765,7 @@ function SmsSettingsTab() {
             </div>
             <div>
               <label className="block text-xs font-semibold text-gray-600 mb-1">AT API Key *</label>
-              <input type="password" value={form.atApiKey} onChange={e => setForm(f => ({...f, atApiKey: e.target.value}))}
+              <PasswordInput value={form.atApiKey} onChange={e => setForm(f => ({...f, atApiKey: e.target.value}))}
                 placeholder="Your Africa's Talking API key"
                 className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm outline-none focus:border-teal-400" />
             </div>

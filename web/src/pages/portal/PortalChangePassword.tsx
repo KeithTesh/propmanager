@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiClient, getApiErrorMessage } from '../../lib/api';
+import { PasswordInput } from '../../components/ui/PasswordInput';
 
 export default function PortalChangePassword() {
   const navigate = useNavigate();
@@ -86,8 +87,7 @@ export default function PortalChangePassword() {
 
             <div>
               <label className="block text-sm font-semibold text-gray-600 mb-1.5">Current password</label>
-              <input
-                type="password"
+              <PasswordInput
                 value={current}
                 onChange={e => setCurrent(e.target.value)}
                 required
@@ -101,8 +101,7 @@ export default function PortalChangePassword() {
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-semibold text-gray-600 mb-1.5">New password</label>
-                  <input
-                    type="password"
+                  <PasswordInput
                     value={newPw}
                     onChange={e => setNewPw(e.target.value)}
                     required
@@ -126,8 +125,7 @@ export default function PortalChangePassword() {
 
                 <div>
                   <label className="block text-sm font-semibold text-gray-600 mb-1.5">Confirm new password</label>
-                  <input
-                    type="password"
+                  <PasswordInput
                     value={newPw2}
                     onChange={e => setNewPw2(e.target.value)}
                     required

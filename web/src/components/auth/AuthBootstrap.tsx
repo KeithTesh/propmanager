@@ -1,9 +1,8 @@
 // web/src/components/auth/AuthBootstrap.tsx
 
 import { useEffect, useState } from 'react';
-import axios from 'axios';
 import { useAuthStore } from '../../stores/authStore';
-import { tokenStore } from '../../lib/api';
+import { apiClient, tokenStore } from '../../lib/api';
 
 interface RefreshResponse {
   success: boolean;
@@ -27,8 +26,8 @@ export function AuthBootstrap({ children }: { children: React.ReactNode }) {
 
   async function restoreSession() {
     try {
-      const res = await axios.post<RefreshResponse>(
-        '/api/v1/auth/refresh', {}, { withCredentials: true }
+      const res = await apiClient.post<RefreshResponse>(
+        '/auth/refresh', {}, { withCredentials: true }
       );
       const { user, company, tokens } = res.data.data;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
