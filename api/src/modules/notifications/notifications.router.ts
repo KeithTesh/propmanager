@@ -19,7 +19,7 @@ function ctx(req: Request): RLSContext {
 // ─── GET /notifications — list notifications for THIS company only ─────────────
 
 notificationsRouter.get('/', async (req: Request, res: Response) => {
-  const { limit = '100', status, archived } = req.query;
+  const { limit = '100', status, archived } = req.query as Record<string, string | undefined>;
   const c          = ctx(req);
   const cid        = c.companyId;
   const propFilter = getPropertyFilter(req);
@@ -221,7 +221,7 @@ notificationsRouter.post('/blast', async (req: Request, res: Response) => {
         AND n.sent_at    > NOW() - INTERVAL '24 hours'
     `);
     if (Number(recentCount?.count ?? 0) > 0) {
-      return res.status(200).json({
+      res.status(200).json({
         success: true,
         data: {
           warn: true,
@@ -229,6 +229,7 @@ notificationsRouter.post('/blast', async (req: Request, res: Response) => {
           message: `${recentCount.count} reminder(s) were already sent in the last 24 hours. Send again anyway?`,
         },
       });
+      return;
     }
   }
 

@@ -142,7 +142,7 @@ async function buildIncomeStatement(wb: ExcelJS.Workbook, data: any): Promise<Bu
   netRow.eachCell(c => { c.font = { bold: true, size: 11 }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: netColor } }; c.border = BORDERS; });
   netRow.height = 24;
 
-  return wb.xlsx.writeBuffer() as Promise<Buffer>;
+  return wb.xlsx.writeBuffer() as unknown as Promise<Buffer>;
 }
 
 // ─── RENT ROLL ────────────────────────────────────────────────────────────────
@@ -175,7 +175,7 @@ async function buildRentRoll(wb: ExcelJS.Workbook, data: any): Promise<Buffer> {
   dataRow(ws, row++, [`Total: ${data.rows.length} units · ${occupied} occupied · ${data.rows.length - occupied} vacant`, '', '', '', '', KES(totalRent), '', '', '']);
   ws.getRow(row - 1).eachCell(c => { c.font = { bold: true }; });
 
-  return wb.xlsx.writeBuffer() as Promise<Buffer>;
+  return wb.xlsx.writeBuffer() as unknown as Promise<Buffer>;
 }
 
 // ─── OCCUPANCY ────────────────────────────────────────────────────────────────
@@ -213,7 +213,7 @@ async function buildOccupancy(wb: ExcelJS.Workbook, data: any): Promise<Buffer> 
     cell.border = BORDERS;
   });
 
-  return wb.xlsx.writeBuffer() as Promise<Buffer>;
+  return wb.xlsx.writeBuffer() as unknown as Promise<Buffer>;
 }
 
 // ─── COLLECTION ───────────────────────────────────────────────────────────────
@@ -247,5 +247,5 @@ async function buildCollection(wb: ExcelJS.Workbook, data: any): Promise<Buffer>
     cell.border = BORDERS;
   });
 
-  return wb.xlsx.writeBuffer() as Promise<Buffer>;
+  return wb.xlsx.writeBuffer() as unknown as Promise<Buffer>;
 }

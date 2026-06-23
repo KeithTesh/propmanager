@@ -24,7 +24,7 @@ export const EXPENSE_CATEGORIES = [
 // ─── GET /expenses ────────────────────────────────────────────────────────────
 
 expensesRouter.get('/', async (req: Request, res: Response) => {
-  const { property_id, category, from, to, limit = '50', offset = '0' } = req.query;
+  const { property_id, category, from, to, limit = '50', offset = '0' } = req.query as Record<string, string | undefined>;
   const propFilter = getPropertyFilter(req);
 
   const expenses = await withRLS(ctx(req), async (db) => db`
@@ -69,7 +69,7 @@ expensesRouter.get('/', async (req: Request, res: Response) => {
 // ─── GET /expenses/summary — category breakdown ───────────────────────────────
 
 expensesRouter.get('/summary', async (req: Request, res: Response) => {
-  const { from, to } = req.query;
+  const { from, to } = req.query as Record<string, string | undefined>;
   const c = ctx(req);
 
   const fromDate = from ?? new Date(new Date().getFullYear(), 0, 1).toISOString().slice(0, 10);
@@ -241,7 +241,7 @@ expensesRouter.post('/:id/charge-to-tenant', async (req: Request, res: Response)
       SELECT id AS lease_id, unit_id FROM leases
       WHERE unit_id = ${expense.unit_id} AND status IN ('active','notice') LIMIT 1
     `);
-    targetLeases = rows as typeof targetLeases;
+    targetLeases = rows as unknown as typeof targetLeases;
   } else {
     if (!expense.property_id) {
       res.status(400).json({ success: false, error: { code: 'NO_PROPERTY', message: 'Set a property on the expense first.' } });
@@ -252,7 +252,7 @@ expensesRouter.post('/:id/charge-to-tenant', async (req: Request, res: Response)
       FROM leases l JOIN units u ON u.id = l.unit_id
       WHERE u.property_id = ${expense.property_id} AND l.status IN ('active','notice')
     `);
-    targetLeases = rows as typeof targetLeases;
+    targetLeases = rows as unknown as typeof targetLeases;
   }
 
   if (targetLeases.length === 0) {

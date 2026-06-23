@@ -23,7 +23,7 @@ const CHANNELS = ['mpesa_paybill','cash','bank_transfer','adjustment'] as const;
 // ─── GET /payments ────────────────────────────────────────────────────────────
 
 paymentsRouter.get('/', async (req: Request, res: Response) => {
-  const { leaseId, billId, limit = '50' } = req.query;
+  const { leaseId, billId, limit = '50' } = req.query as Record<string, string | undefined>;
 
   const payments = await withRLS(ctx(req), async (db) => {
     return db`
@@ -108,7 +108,7 @@ paymentsRouter.get('/summary', async (req: Request, res: Response) => {
 // ─── GET /bills — list bills (for payments page) ──────────────────────────────
 
 paymentsRouter.get('/bills', async (req: Request, res: Response) => {
-  const { status, leaseId } = req.query;
+  const { status, leaseId } = req.query as Record<string, string | undefined>;
 
   const bills = await withRLS(ctx(req), async (db) => {
     return db`

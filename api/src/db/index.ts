@@ -24,7 +24,7 @@ function createPool(connectionString: string, options: postgres.Options<Record<s
     ssl: { rejectUnauthorized: false },  // always require SSL for Neon
     onnotice: (notice) => logger.debug({ notice }, 'PostgreSQL notice'),
     debug: process.env.NODE_ENV === 'development'
-      ? (connection, query, params) => logger.debug({ query, params }, 'SQL')
+      ? (_connection, query, params) => logger.debug({ query, params }, 'SQL')
       : undefined,
     ...options,
   });
@@ -96,12 +96,17 @@ export async function withRLS<T>(
  */
 export async function withRLSTransaction<T>(
   ctx: RLSContext,
-  fn: (tx: postgres.TransactionSql) => Promise<T>
+  fn: (tx: postgres.Sql) => Promise<T>
 ): Promise<T> {
   // sql.begin() wraps everything in BEGIN/COMMIT.
   // set_config with is_local=true is genuinely transaction-scoped here
   // because we ARE inside a transaction — context reverts on COMMIT/ROLLBACK.
-  return sql.begin(async (tx) => {
+  //
+  // NOTE: postgres.js v3.4's TransactionSql type is defined via `Omit<Sql, ...>`,
+  // and TS's Omit drops call signatures — so TransactionSql can't type-check as
+  // callable, even though it is one at runtime. Cast through Sql instead.
+  return sql.begin(async (rawTx) => {
+    const tx = rawTx as unknown as postgres.Sql;
     await tx`
       SELECT
         set_config('app.current_company_id', ${ctx.companyId}, true),
@@ -110,7 +115,7 @@ export async function withRLSTransaction<T>(
         set_config('TimeZone', 'Africa/Nairobi', true)
     `;
     return fn(tx);
-  });
+  }) as Promise<T>;
 }
 
 /**

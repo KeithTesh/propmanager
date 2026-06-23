@@ -11,7 +11,7 @@ function ctx(req: Request): RLSContext {
 }
 
 // Human-readable label for each table+action combo
-function eventLabel(tableName: string, action: string, newValues: Record<string, unknown> | null, oldValues: Record<string, unknown> | null): string {
+function eventLabel(tableName: string, action: string, newValues: Record<string, unknown> | null, _oldValues: Record<string, unknown> | null): string {
   switch (tableName) {
     case 'payments':
       if (action === 'INSERT') return 'Payment recorded';
@@ -106,6 +106,9 @@ auditRouter.get('/', async (req: Request, res: Response) => {
 
   const actorIsSystem = actor === 'system';
   const actorUuid     = actor && !actorIsSystem ? actor as string : null;
+  const actionStr = action as string | undefined;
+  const fromStr   = from as string | undefined;
+  const toStr     = to as string | undefined;
 
   // Resolve table filter from group
   let tablesToFilter: string[] | null = null;
@@ -127,9 +130,9 @@ auditRouter.get('/', async (req: Request, res: Response) => {
       ${tablesToFilter    ? db`AND al.table_name = ANY(${tablesToFilter})` : db``}
       ${actorIsSystem     ? db`AND al.actor_id IS NULL`                    : db``}
       ${actorUuid         ? db`AND al.actor_id = ${actorUuid}::uuid`       : db``}
-      ${action            ? db`AND al.action   = ${action}`                : db``}
-      ${from              ? db`AND al.created_at >= ${from}::TIMESTAMPTZ`  : db``}
-      ${to                ? db`AND al.created_at <= ${to}::TIMESTAMPTZ`    : db``}
+      ${actionStr         ? db`AND al.action   = ${actionStr}`             : db``}
+      ${fromStr           ? db`AND al.created_at >= ${fromStr}::TIMESTAMPTZ` : db``}
+      ${toStr             ? db`AND al.created_at <= ${toStr}::TIMESTAMPTZ`   : db``}
     ORDER BY al.created_at DESC
     LIMIT  ${parseInt(limit as string)}
     OFFSET ${parseInt(offset as string)}
@@ -157,9 +160,9 @@ auditRouter.get('/', async (req: Request, res: Response) => {
       ${tablesToFilter    ? db`AND table_name = ANY(${tablesToFilter})` : db``}
       ${actorIsSystem     ? db`AND actor_id IS NULL`                    : db``}
       ${actorUuid         ? db`AND actor_id  = ${actorUuid}::uuid`      : db``}
-      ${action            ? db`AND action    = ${action}`               : db``}
-      ${from              ? db`AND created_at >= ${from}::TIMESTAMPTZ`  : db``}
-      ${to                ? db`AND created_at <= ${to}::TIMESTAMPTZ`    : db``}
+      ${actionStr         ? db`AND action    = ${actionStr}`            : db``}
+      ${fromStr           ? db`AND created_at >= ${fromStr}::TIMESTAMPTZ` : db``}
+      ${toStr             ? db`AND created_at <= ${toStr}::TIMESTAMPTZ`   : db``}
   `);
 
   res.json({

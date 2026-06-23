@@ -184,7 +184,10 @@ unitsRouter.post('/bulk', async (req: Request, res: Response) => {
     return;
   }
 
-  const units = [];
+  const units: {
+    id: string; property_id: string; company_id: string; unit_number: string;
+    unit_type: string | null; bedrooms: number | null; bathrooms: number | null;
+  }[] = [];
   for (let i = data.from; i <= data.to; i++) {
     units.push({
       id:          randomUUID(),

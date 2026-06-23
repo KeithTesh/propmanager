@@ -14,8 +14,9 @@
  */
 
 import cron from 'node-cron';
-import { format, startOfMonth, addMonths, addDays } from 'date-fns';
+import { format, startOfMonth } from 'date-fns';
 import { toZonedTime } from 'date-fns-tz';
+import type postgres from 'postgres';
 import { sql, systemQuery } from '../db';
 import { withLock } from '../db/redis';
 import { logger } from '../lib/logger';
@@ -69,6 +70,13 @@ export function scheduleBillingCron(): void {
   cron.schedule('*/2 * * * *', () => {
     runStkExpiryCron().catch(err =>
       logger.error({ err }, 'STK expiry cron crashed')
+    );
+  }, { timezone: 'Africa/Nairobi' });
+
+  // Purge deleted companies — daily at 02:00 Nairobi
+  cron.schedule('0 2 * * *', () => {
+    purgeDeletedCompanies().catch(err =>
+      logger.error({ err }, 'Purge deleted companies cron crashed')
     );
   }, { timezone: 'Africa/Nairobi' });
 
@@ -157,7 +165,8 @@ async function runBillingForCompany(
     const batch = leases.slice(i, i + BATCH_SIZE);
 
     await systemQuery(async (db) => {
-      return db.begin(async (tx) => {
+      return db.begin(async (rawTx) => {
+        const tx = rawTx as unknown as postgres.Sql;
         for (const lease of batch) {
           // Skip if bill already exists for this month (idempotency)
           const [existing] = await tx`

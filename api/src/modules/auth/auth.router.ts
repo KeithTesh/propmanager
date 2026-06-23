@@ -15,7 +15,7 @@ const COOKIE_OPTIONS = {
   secure:   isProd,
   // Web (Vercel) and API (Render) are different domains in production, so the
   // refresh cookie must be sent cross-site. 'none' requires secure: true.
-  sameSite: (isProd ? 'none' : 'lax') as const,
+  sameSite: isProd ? 'none' as const : 'lax' as const,
   maxAge:   7 * 24 * 60 * 60 * 1000,
   path:     '/',
 };

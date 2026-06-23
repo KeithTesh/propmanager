@@ -4,12 +4,12 @@
 
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
+import type postgres from 'postgres';
 import { sql } from '../../db';
-import { withRLS } from '../../db';
 import { authenticate } from '../../middleware/auth';
 import { randomUUID } from 'crypto';
 import { logger } from '../../lib/logger';
-import type { ApiResponse, RLSContext } from '../../types';
+import type { ApiResponse } from '../../types';
 import { sendSubscriptionActivatedEmail } from '../../lib/email';
 
 export const subscriptionRouter = Router();
@@ -29,10 +29,6 @@ const PLAN_UNITS: Record<string, number> = {
   growth:     200,
   enterprise: 999999,
 };
-
-function ctx(req: Request): RLSContext {
-  return { companyId: req.ctx.companyId!, userId: req.ctx.userId, userRole: req.ctx.userRole };
-}
 
 // ── GET /subscription/status ─── current subscription state ──────────────────
 
@@ -186,7 +182,6 @@ subscriptionRouter.post('/webhook', async (req: Request, res: Response) => {
   try {
     const apiRef  = payload?.invoice?.api_ref ?? payload?.api_ref;
     const state   = (payload?.invoice?.state ?? payload?.state ?? '').toUpperCase();
-    const invoiceId = payload?.invoice?.id ?? payload?.id;
 
     if (!apiRef) {
       res.status(200).json({ received: true }); // acknowledge but don't process
@@ -239,7 +234,8 @@ async function activateSubscription(payment: any) {
   const monthlyFee = PLAN_PRICES[payment.plan] ?? 0;
   const unitLimit  = PLAN_UNITS[payment.plan] ?? 50;
 
-  await sql.begin(async (tx) => {
+  await sql.begin(async (rawTx) => {
+    const tx = rawTx as unknown as postgres.Sql;
     // 1. Mark payment completed
     await tx`
       UPDATE subscription_payments SET

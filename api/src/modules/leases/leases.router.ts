@@ -20,7 +20,7 @@ function ctx(req: Request): RLSContext {
 // ─── GET /leases ──────────────────────────────────────────────────────────────
 
 leasesRouter.get('/', async (req: Request, res: Response) => {
-  const { status, unitId, tenantId } = req.query;
+  const { status, unitId, tenantId } = req.query as Record<string, string | undefined>;
 
   const leases = await withRLS(ctx(req), async (db) => {
     return db`

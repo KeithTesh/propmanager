@@ -2,6 +2,7 @@
 
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
+import type postgres from 'postgres';
 import { randomUUID } from 'crypto';
 import bcrypt from 'bcryptjs';
 import { sql } from '../../db';
@@ -60,7 +61,8 @@ companiesRouter.post('/', requireRole('super_admin'), async (req: Request, res: 
   const passwordHash = await bcrypt.hash(data.adminPassword, 12);
 
   // Create company + admin in a single transaction
-  await sql.begin(async (trx) => {
+  await sql.begin(async (rawTrx) => {
+    const trx = rawTrx as unknown as postgres.Sql;
     await trx`
       INSERT INTO companies (
         id, name, trading_name, phone, email,

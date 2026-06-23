@@ -3,7 +3,6 @@
 
 import { notifyAllStaff, notifyManagers, notifyFinance, notifyOwners, notifyUser } from './inAppNotify';
 import { withRLS, RLSContext } from '../db';
-import { logger } from './logger';
 
 const KES = (n: number | string) =>
   'KES ' + Number(n).toLocaleString('en-KE', { maximumFractionDigits: 0 });

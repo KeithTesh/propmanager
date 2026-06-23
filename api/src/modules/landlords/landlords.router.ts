@@ -144,8 +144,6 @@ landlordsRouter.get('/:id', async (req: Request, res: Response) => {
   `);
 
   // This month summary
-  const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
   const [monthStats] = await withRLS(c, async (db) => db`
     SELECT
       COALESCE(SUM(b.amount), 0)                              AS total_billed,

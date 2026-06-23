@@ -11,8 +11,6 @@ import { sendTrialExpiryEmail } from '../lib/email';
 export async function runTrialReminderCron() {
   logger.info('Running trial reminder cron');
 
-  const now = new Date();
-
   // Find trialing companies whose trial expires in 7, 3, or 1 day(s)
   // that haven't received that specific reminder yet
   const companies = await sql`

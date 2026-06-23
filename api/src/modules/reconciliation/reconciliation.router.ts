@@ -3,7 +3,6 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { randomUUID } from 'crypto';
-import { createHash } from 'crypto';
 import { withRLS, withRLSTransaction } from '../../db';
 import { authenticate } from '../../middleware/auth';
 import { logger } from '../../lib/logger';
@@ -209,9 +208,10 @@ reconciliationRouter.post('/import', async (req: Request, res: Response) => {
         const paymentId = randomUUID();
 
         // Check for duplicate
-        if (row.transactionRef) {
+        const transactionRef = row.transactionRef;
+        if (transactionRef) {
           const [dup] = await withRLS(ctx(req), async (db) => {
-            return db`SELECT id FROM payments WHERE company_id = ${companyId} AND bank_transaction_ref = ${row.transactionRef}`;
+            return db`SELECT id FROM payments WHERE company_id = ${companyId} AND bank_transaction_ref = ${transactionRef}`;
           });
           if (dup) { duplicates++; continue; }
         }
@@ -267,9 +267,10 @@ reconciliationRouter.post('/import', async (req: Request, res: Response) => {
     }
 
     // Check for duplicate bank ref
-    if (row.transactionRef) {
+    const transactionRef = row.transactionRef;
+    if (transactionRef) {
       const [dup] = await withRLS(ctx(req), async (db) => {
-        return db`SELECT id FROM payments WHERE company_id = ${companyId} AND bank_transaction_ref = ${row.transactionRef}`;
+        return db`SELECT id FROM payments WHERE company_id = ${companyId} AND bank_transaction_ref = ${transactionRef}`;
       });
       if (dup) { duplicates++; continue; }
     }

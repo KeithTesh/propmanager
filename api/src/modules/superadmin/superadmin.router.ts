@@ -13,7 +13,7 @@ const requireSuperAdmin = requireRole('super_admin');
 
 // ─── GET /superadmin/stats ────────────────────────────────────────────────────
 
-superAdminRouter.get('/stats', requireSuperAdmin, async (req: Request, res: Response) => {
+superAdminRouter.get('/stats', requireSuperAdmin, async (_req: Request, res: Response) => {
   const [stats] = await sql`
     SELECT
       COUNT(*)                                                        AS total_companies,
@@ -47,7 +47,7 @@ superAdminRouter.get('/stats', requireSuperAdmin, async (req: Request, res: Resp
 // ─── GET /superadmin/companies ────────────────────────────────────────────────
 
 superAdminRouter.get('/companies', requireSuperAdmin, async (req: Request, res: Response) => {
-  const { search, status, plan } = req.query;
+  const { search, status, plan } = req.query as Record<string, string | undefined>;
 
   const companies = await sql`
     SELECT
@@ -274,7 +274,7 @@ superAdminRouter.post('/companies/:id/cancel', requireSuperAdmin, async (req: Re
 
 superAdminRouter.delete('/companies/:id', requireSuperAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { confirm } = z.object({ confirm: z.literal('DELETE') }).parse(req.body);
+  z.object({ confirm: z.literal('DELETE') }).parse(req.body);
 
   const [company] = await sql`SELECT id, name FROM companies WHERE id = ${id} AND deleted_at IS NULL`;
   if (!company) throw new NotFoundError('Company not found');
@@ -339,7 +339,7 @@ superAdminRouter.post('/companies/:id/restore', requireSuperAdmin, async (req: R
 
 // ─── GET /superadmin/deleted ── list soft-deleted companies ───────────────────
 
-superAdminRouter.get('/deleted', requireSuperAdmin, async (req: Request, res: Response) => {
+superAdminRouter.get('/deleted', requireSuperAdmin, async (_req: Request, res: Response) => {
   const companies = await sql`
     SELECT
       c.id, c.name, c.email, c.phone, c.deleted_at,
@@ -358,7 +358,7 @@ superAdminRouter.get('/deleted', requireSuperAdmin, async (req: Request, res: Re
 
 // ─── GET /superadmin/events ───────────────────────────────────────────────────
 
-superAdminRouter.get('/events', requireSuperAdmin, async (req: Request, res: Response) => {
+superAdminRouter.get('/events', requireSuperAdmin, async (_req: Request, res: Response) => {
   const events = await sql`
     SELECT se.*, c.name AS company_name, u.full_name AS performed_by_name
     FROM subscription_events se
@@ -372,7 +372,7 @@ superAdminRouter.get('/events', requireSuperAdmin, async (req: Request, res: Res
 
 // ─── GET /superadmin/pending ─── all pending requests across platform ─────────
 
-superAdminRouter.get('/pending', requireSuperAdmin, async (req: Request, res: Response) => {
+superAdminRouter.get('/pending', requireSuperAdmin, async (_req: Request, res: Response) => {
   const senderRequests = await sql`
     SELECT sr.*, c.name AS company_name, u.full_name AS requested_by_name
     FROM sender_id_requests sr
@@ -483,9 +483,10 @@ superAdminRouter.post('/quota/:id/reject', requireSuperAdmin, async (req: Reques
 
   await sql`
     UPDATE sms_quota_requests SET
-      status      = 'rejected',
-      reviewed_by = ${req.ctx.userId},
-      reviewed_at = NOW()
+      status         = 'rejected',
+      rejection_note = ${note},
+      reviewed_by    = ${req.ctx.userId},
+      reviewed_at    = NOW()
     WHERE id = ${id} AND status = 'pending'
   `;
 
@@ -495,7 +496,7 @@ superAdminRouter.post('/quota/:id/reject', requireSuperAdmin, async (req: Reques
 
 // ─── GET /superadmin/sms-usage ─── per-company SMS usage ─────────────────────
 
-superAdminRouter.get('/sms-usage', requireSuperAdmin, async (req: Request, res: Response) => {
+superAdminRouter.get('/sms-usage', requireSuperAdmin, async (_req: Request, res: Response) => {
   const companies = await sql`
     SELECT
       c.id, c.name,
@@ -535,7 +536,7 @@ superAdminRouter.get('/sms-usage', requireSuperAdmin, async (req: Request, res: 
 
 // ─── GET /superadmin/platform-settings ── all configurable settings ──────────
 
-superAdminRouter.get('/platform-settings', requireSuperAdmin, async (req: Request, res: Response) => {
+superAdminRouter.get('/platform-settings', requireSuperAdmin, async (_req: Request, res: Response) => {
   const settings = await sql`SELECT key, value, description, updated_at FROM platform_settings ORDER BY key`;
   res.json({ success: true, data: { settings } } satisfies ApiResponse<unknown>);
 });

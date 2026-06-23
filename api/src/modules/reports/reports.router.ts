@@ -26,7 +26,7 @@ async function getCompanyName(req: Request): Promise<string> {
 // ─── GET /reports/income-statement ───────────────────────────────────────────
 
 reportsRouter.get('/income-statement', async (req: Request, res: Response) => {
-  const { from, to, format = 'pdf' } = req.query;
+  const { from, to, format = 'pdf' } = req.query as Record<string, string | undefined>;
   const c = ctx(req);
 
   const fromDate = (from as string) ?? new Date(new Date().getFullYear(), 0, 1).toISOString().slice(0, 10);
@@ -126,7 +126,7 @@ reportsRouter.get('/income-statement', async (req: Request, res: Response) => {
 // ─── GET /reports/rent-roll ───────────────────────────────────────────────────
 
 reportsRouter.get('/rent-roll', async (req: Request, res: Response) => {
-  const { property_id, format = 'pdf' } = req.query;
+  const { property_id, format = 'pdf' } = req.query as Record<string, string | undefined>;
   const c = ctx(req);
 
   const rows = await withRLS(c, async (db) => db`
@@ -232,7 +232,7 @@ reportsRouter.get('/occupancy', async (req: Request, res: Response) => {
 // ─── GET /reports/collection ──────────────────────────────────────────────────
 
 reportsRouter.get('/collection', async (req: Request, res: Response) => {
-  const { month, format = 'pdf' } = req.query;
+  const { month, format = 'pdf' } = req.query as Record<string, string | undefined>;
   const c = ctx(req);
 
   const forMonth = month

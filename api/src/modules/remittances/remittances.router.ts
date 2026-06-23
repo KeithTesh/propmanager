@@ -2,6 +2,7 @@
 
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
+import type postgres from 'postgres';
 import { randomUUID } from 'crypto';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -83,7 +84,7 @@ remittancesRouter.get('/', async (req: Request, res: Response) => {
   await requireAgent(req);
   requireViewRole(req);
   const c = ctx(req);
-  const { landlordId, status } = req.query;
+  const { landlordId, status } = req.query as Record<string, string | undefined>;
 
   const statements = await withRLS(c, async (db) => db`
     SELECT
@@ -300,7 +301,8 @@ remittancesRouter.post('/generate/confirm', async (req: Request, res: Response) 
 
   const statementId = randomUUID();
 
-  await sql.begin(async (tx) => {
+  await sql.begin(async (rawTx) => {
+    const tx = rawTx as unknown as postgres.Sql;
     await tx`
       INSERT INTO remittance_statements (
         id, company_id, landlord_id, period_month,
@@ -475,7 +477,8 @@ remittancesRouter.post('/:id/dispute', async (req: Request, res: Response) => {
     return;
   }
 
-  await sql.begin(async (tx) => {
+  await sql.begin(async (rawTx) => {
+    const tx = rawTx as unknown as postgres.Sql;
     await tx`
       INSERT INTO remittance_disputes (statement_id, landlord_id, reason, status)
       VALUES (${id}, ${statement.landlord_id}, ${reason}, 'open')
@@ -523,7 +526,8 @@ remittancesRouter.patch('/:id/dispute', async (req: Request, res: Response) => {
   `;
   if (!dispute) throw new NotFoundError('No dispute found for this statement');
 
-  await sql.begin(async (tx) => {
+  await sql.begin(async (rawTx) => {
+    const tx = rawTx as unknown as postgres.Sql;
     await tx`
       UPDATE remittance_disputes SET
         agent_response = ${agentResponse},

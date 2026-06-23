@@ -4,6 +4,7 @@
 
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
+import type postgres from 'postgres';
 import { sql } from '../../db';
 import { randomUUID } from 'crypto';
 import bcrypt from 'bcryptjs';
@@ -91,7 +92,10 @@ registerRouter.post('/register', async (req: Request, res: Response) => {
   const phone = body.phone.replace(/\s+/g, '').replace(/^0/, '254').replace(/^\+/, '');
 
   // Create company + owner in a transaction
-  await sql.begin(async (tx) => {
+  // postgres.js's TransactionSql type loses its call signature via `Omit` (TS bug),
+  // so it can't type-check as a tagged-template tag — cast through Sql instead.
+  await sql.begin(async (rawTx) => {
+    const tx = rawTx as unknown as postgres.Sql;
     // 1. Create company
     await tx`
       INSERT INTO companies (

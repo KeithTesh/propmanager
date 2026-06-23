@@ -2,11 +2,12 @@
 
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { randomUUID } from 'crypto';
+import { randomUUID, randomInt } from 'crypto';
 import { sql } from '../../db';
 import { getRedis } from '../../db/redis';
 import { UnauthorizedError } from '../../lib/errors';
 import { logger } from '../../lib/logger';
+import { sendSms } from '../../lib/sms';
 import type { UserRole } from '../../types';
 
 // ─── TYPES ───────────────────────────────────────────────────────────────────
@@ -52,7 +53,7 @@ function generateAccessToken(user: AuthUser): string {
       role:      user.role,
     },
     process.env.JWT_SECRET!,
-    { expiresIn: ACCESS_TOKEN_TTL }
+    { expiresIn: ACCESS_TOKEN_TTL as jwt.SignOptions['expiresIn'] }
   );
 }
 
@@ -60,7 +61,7 @@ function generateRefreshToken(userId: string): string {
   return jwt.sign(
     { sub: userId, jti: randomUUID() },
     process.env.JWT_REFRESH_SECRET!,
-    { expiresIn: REFRESH_TOKEN_TTL }
+    { expiresIn: REFRESH_TOKEN_TTL as jwt.SignOptions['expiresIn'] }
   );
 }
 
@@ -283,6 +284,121 @@ export async function refresh(refreshToken: string): Promise<{
  */
 export async function logout(refreshToken: string): Promise<void> {
   await revokeRefreshToken(refreshToken);
+}
+
+// ─── PASSWORD RESET (SMS-based) ───────────────────────────────────────────────
+// Flow: forgotPassword (sends 6-digit code) → verifyResetCode (exchanges code
+// for a one-time reset token) → resetPassword (exchanges token for new password).
+// State lives in Redis only — codes/tokens are short-lived and single-use.
+
+const RESET_CODE_TTL_SECONDS  = 10 * 60; // 10 minutes
+const RESET_TOKEN_TTL_SECONDS = 10 * 60;
+const RESET_CODE_MAX_ATTEMPTS = 5;
+
+function normalisePhoneForLookup(raw: string): string {
+  // Mirrors the normalisation used at registration time (register.router.ts)
+  // so lookups match what's actually stored in users.phone.
+  return raw.replace(/\s+/g, '').replace(/^0/, '254').replace(/^\+/, '');
+}
+
+/**
+ * Request a password reset code via SMS.
+ * Always resolves silently (even if the phone isn't registered) to avoid
+ * leaking which phone numbers have accounts.
+ */
+export async function forgotPassword(phone: string): Promise<void> {
+  const normalised = normalisePhoneForLookup(phone);
+
+  const [user] = await sql`
+    SELECT id FROM users
+    WHERE phone = ${normalised} AND deleted_at IS NULL AND is_active = TRUE
+    LIMIT 1
+  `;
+
+  if (!user) {
+    logger.info({ phone: normalised }, 'Password reset requested for unknown/inactive phone');
+    return;
+  }
+
+  const code = randomInt(100000, 1000000).toString(); // 6 digits
+  const codeHash = await bcrypt.hash(code, 10);
+
+  const redis = getRedis();
+  await redis.set(
+    `pwreset:code:${normalised}`,
+    JSON.stringify({ userId: user.id, codeHash, attempts: 0 }),
+    'EX', RESET_CODE_TTL_SECONDS
+  );
+
+  await sendSms(normalised, `Your PropManager password reset code is ${code}. It expires in 10 minutes. If you didn't request this, ignore this message.`);
+
+  logger.info({ userId: user.id }, 'Password reset code sent');
+}
+
+/**
+ * Verify a 6-digit reset code and exchange it for a one-time reset token.
+ * The code is single-use — deleted from Redis on success.
+ */
+export async function verifyResetCode(phone: string, code: string): Promise<string> {
+  const normalised = normalisePhoneForLookup(phone);
+  const redis = getRedis();
+  const key = `pwreset:code:${normalised}`;
+
+  const raw = await redis.get(key);
+  if (!raw) throw new UnauthorizedError('Invalid or expired code. Please request a new one.');
+
+  const state = JSON.parse(raw) as { userId: string; codeHash: string; attempts: number };
+
+  if (state.attempts >= RESET_CODE_MAX_ATTEMPTS) {
+    await redis.del(key);
+    throw new UnauthorizedError('Too many incorrect attempts. Please request a new code.');
+  }
+
+  const valid = await bcrypt.compare(code, state.codeHash);
+  if (!valid) {
+    state.attempts += 1;
+    await redis.set(key, JSON.stringify(state), 'KEEPTTL');
+    throw new UnauthorizedError('Invalid code.');
+  }
+
+  await redis.del(key);
+
+  const resetToken = randomUUID();
+  await redis.set(
+    `pwreset:token:${resetToken}`,
+    JSON.stringify({ userId: state.userId }),
+    'EX', RESET_TOKEN_TTL_SECONDS
+  );
+
+  return resetToken;
+}
+
+/**
+ * Exchange a verified reset token for a new password.
+ * The token is single-use — deleted from Redis on success or failure.
+ */
+export async function resetPassword(resetToken: string, newPassword: string): Promise<void> {
+  const redis = getRedis();
+  const key = `pwreset:token:${resetToken}`;
+
+  const raw = await redis.get(key);
+  if (!raw) throw new UnauthorizedError('Invalid or expired reset token. Please start over.');
+
+  await redis.del(key);
+
+  const { userId } = JSON.parse(raw) as { userId: string };
+
+  if (newPassword.length < 8) {
+    throw new UnauthorizedError('New password must be at least 8 characters');
+  }
+
+  const hash = await bcrypt.hash(newPassword, 12);
+  await sql`
+    UPDATE users SET password_hash = ${hash}, updated_at = NOW()
+    WHERE id = ${userId}
+  `;
+
+  logger.info({ userId }, 'Password reset via SMS code');
 }
 
 /**

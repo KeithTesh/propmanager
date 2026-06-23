@@ -174,7 +174,8 @@ dashboardRouter.get('/stats', async (req: Request, res: Response) => {
   ]);
 
   if (role === 'caretaker') {
-    return res.json({ success: true, data: { occupancy, revenue: null, revenueChart: [], billStatus: null, recentPayments: [], recentLeases: [], maintenanceSummary } } satisfies ApiResponse<unknown>);
+    res.json({ success: true, data: { occupancy, revenue: null, revenueChart: [], billStatus: null, recentPayments: [], recentLeases: [], maintenanceSummary } } satisfies ApiResponse<unknown>);
+    return;
   }
 
   res.json({ success: true, data: { occupancy, revenue, revenueChart, billStatus, recentPayments, recentLeases, maintenanceSummary } } satisfies ApiResponse<unknown>);

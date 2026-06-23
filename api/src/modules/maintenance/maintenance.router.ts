@@ -23,7 +23,7 @@ const CATEGORIES = ['plumbing','electrical','structural','cleaning','appliance',
 // ─── GET /maintenance ─────────────────────────────────────────────────────────
 
 maintenanceRouter.get('/', async (req: Request, res: Response) => {
-  const { status, priority, propertyId } = req.query;
+  const { status, priority, propertyId } = req.query as Record<string, string | undefined>;
 
   const requests = await withRLS(ctx(req), async (db) => {
     return db`

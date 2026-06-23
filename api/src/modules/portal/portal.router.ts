@@ -112,7 +112,7 @@ portalRouter.get('/bills', async (req: Request, res: Response) => {
   tenantOnly(req);
   const c = ctx(req);
 
-  const { status, page = '1', per_page = '20' } = req.query;
+  const { status, page = '1', per_page = '20' } = req.query as Record<string, string | undefined>;
   const offset = (Number(page) - 1) * Number(per_page);
 
   const bills = await withRLS(c, async (db) => db`

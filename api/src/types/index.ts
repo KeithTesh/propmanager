@@ -5,6 +5,8 @@
  * Keep in sync with migrations.
  */
 
+export type { RLSContext } from '../db';
+
 // ─── ENUMS (mirror schema exactly) ───────────────────────────────────────────
 
 export type CompanyPaymentMethod = 'bank_paybill' | 'daraja_stk' | 'cash' | 'manual';
@@ -37,7 +39,7 @@ export type NotificationStatus =
   | 'failed'
   | 'cancelled'
   | 'permanent_failure';
-export type UserRole = 'super_admin' | 'owner' | 'manager' | 'finance' | 'caretaker' | 'tenant';
+export type UserRole = 'super_admin' | 'owner' | 'manager' | 'finance' | 'caretaker' | 'tenant' | 'landlord_client';
 export type MaintenanceStatus = 'open' | 'in_progress' | 'resolved' | 'closed';
 export type MaintenancePriority = 'low' | 'medium' | 'high' | 'urgent';
 export type UnmatchedPaymentResolution = 'assigned' | 'wrong_property' | 'written_off' | 'pending';

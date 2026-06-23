@@ -107,7 +107,7 @@ payrollRouter.get('/employees/:id', requireRole('owner', 'finance'), async (req:
       AND e.deleted_at IS NULL
   `);
 
-  if (!employee) return res.status(404).json({ success: false, error: 'Employee not found' });
+  if (!employee) { res.status(404).json({ success: false, error: 'Employee not found' }); return; }
 
   // also fetch advance balance
   const [advance] = await withRLS(ctx(req), async (db) => db`
@@ -122,7 +122,7 @@ payrollRouter.get('/employees/:id', requireRole('owner', 'finance'), async (req:
 // POST /payroll/employees
 payrollRouter.post('/employees', requireRole('owner', 'finance'), async (req: Request, res: Response) => {
   const parsed = EmployeeSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ success: false, error: parsed.error.issues[0].message });
+  if (!parsed.success) { res.status(400).json({ success: false, error: parsed.error.issues[0].message }); return; }
   const d = parsed.data;
 
   const [employee] = await withRLS(ctx(req), async (db) => db`
@@ -158,7 +158,7 @@ payrollRouter.post('/employees', requireRole('owner', 'finance'), async (req: Re
 // PATCH /payroll/employees/:id
 payrollRouter.patch('/employees/:id', requireRole('owner', 'finance'), async (req: Request, res: Response) => {
   const parsed = EmployeeSchema.partial().safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ success: false, error: parsed.error.issues[0].message });
+  if (!parsed.success) { res.status(400).json({ success: false, error: parsed.error.issues[0].message }); return; }
   const d = parsed.data;
 
   const [employee] = await withRLS(ctx(req), async (db) => db`
@@ -205,7 +205,7 @@ payrollRouter.patch('/employees/:id', requireRole('owner', 'finance'), async (re
     RETURNING *
   `);
 
-  if (!employee) return res.status(404).json({ success: false, error: 'Employee not found' });
+  if (!employee) { res.status(404).json({ success: false, error: 'Employee not found' }); return; }
   res.json({ success: true, data: employee } satisfies ApiResponse);
 });
 
@@ -226,7 +226,7 @@ payrollRouter.get('/employees/:id/payslip-preview', requireRole('owner', 'financ
     SELECT * FROM employees
     WHERE id = ${req.params.id} AND company_id = ${ctx(req).companyId} AND deleted_at IS NULL
   `);
-  if (!emp) return res.status(404).json({ success: false, error: 'Employee not found' });
+  if (!emp) { res.status(404).json({ success: false, error: 'Employee not found' }); return; }
 
   // Get outstanding advance balance for auto-deduction
   const [advRow] = await withRLS(ctx(req), async (db) => db`
@@ -278,7 +278,7 @@ payrollRouter.get('/advances', requireRole('owner', 'finance'), async (req: Requ
 
 payrollRouter.post('/advances', requireRole('owner', 'finance'), async (req: Request, res: Response) => {
   const parsed = AdvanceSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ success: false, error: parsed.error.issues[0].message });
+  if (!parsed.success) { res.status(400).json({ success: false, error: parsed.error.issues[0].message }); return; }
   const d = parsed.data;
 
   // Verify employee belongs to company
@@ -286,7 +286,7 @@ payrollRouter.post('/advances', requireRole('owner', 'finance'), async (req: Req
     SELECT id FROM employees WHERE id = ${d.employee_id}
       AND company_id = ${ctx(req).companyId} AND deleted_at IS NULL
   `);
-  if (!emp) return res.status(404).json({ success: false, error: 'Employee not found' });
+  if (!emp) { res.status(404).json({ success: false, error: 'Employee not found' }); return; }
 
   const monthlyDeduction = Math.ceil(d.amount / d.repayment_months);
 
@@ -316,7 +316,7 @@ payrollRouter.post('/advances/:id/disburse', requireRole('owner', 'finance'), as
       AND is_disbursed = FALSE
     RETURNING *
   `);
-  if (!advance) return res.status(404).json({ success: false, error: 'Advance not found or already disbursed' });
+  if (!advance) { res.status(404).json({ success: false, error: 'Advance not found or already disbursed' }); return; }
   res.json({ success: true, data: advance } satisfies ApiResponse);
 });
 
@@ -348,7 +348,7 @@ payrollRouter.get('/runs/:id', requireRole('owner', 'finance'), async (req: Requ
     LEFT JOIN users a ON a.id = r.approved_by
     WHERE r.id = ${req.params.id} AND r.company_id = ${ctx(req).companyId}
   `);
-  if (!run) return res.status(404).json({ success: false, error: 'Payroll run not found' });
+  if (!run) { res.status(404).json({ success: false, error: 'Payroll run not found' }); return; }
 
   const items = await withRLS(ctx(req), async (db) => db`
     SELECT i.*, e.full_name AS employee_name, e.job_title, e.department,
@@ -376,7 +376,7 @@ payrollRouter.post('/runs', requireRole('owner', 'finance'), async (req: Request
       AND payroll_month = ${monthDate}
       AND status NOT IN ('cancelled', 'archived')
   `);
-  if (existing) return res.status(409).json({ success: false, error: `An active payroll run for ${monthDate.slice(0,7)} already exists. Cancel it first before creating a new one.` });
+  if (existing) { res.status(409).json({ success: false, error: `An active payroll run for ${monthDate.slice(0,7)} already exists. Cancel it first before creating a new one.` }); return; }
 
   // Load all active employees
   const employees = await withRLS(ctx(req), async (db) => db`
@@ -395,10 +395,11 @@ payrollRouter.post('/runs', requireRole('owner', 'finance'), async (req: Request
   `);
 
   if (employees.length === 0) {
-    return res.status(400).json({
+    res.status(400).json({
       success: false,
       error: `No active employees found for ${monthDate}. Ensure employees have a start_date on or before this month.`,
     });
+    return;
   }
 
   // Calculate payroll for each employee — fetch real advance balance from salary_advances
@@ -521,13 +522,15 @@ payrollRouter.post('/runs/:id/approve', requireRole('owner', 'finance'), async (
     SELECT * FROM payroll_runs
     WHERE id = ${req.params.id} AND company_id = ${ctx(req).companyId}
   `);
-  if (!run) return res.status(404).json({ success: false, error: 'Payroll run not found' });
+  if (!run) { res.status(404).json({ success: false, error: 'Payroll run not found' }); return; }
   if (run.status !== 'draft') {
-    return res.status(400).json({ success: false, error: `Cannot approve a run in status: ${run.status}` });
+    res.status(400).json({ success: false, error: `Cannot approve a run in status: ${run.status}` });
+    return;
   }
   // Prevent self-approval only if they also created it
   if (run.created_by === ctx(req).userId && req.ctx.userRole !== 'owner') {
-    return res.status(403).json({ success: false, error: 'You cannot approve a payroll run you created' });
+    res.status(403).json({ success: false, error: 'You cannot approve a payroll run you created' });
+    return;
   }
 
   const [updated] = await withRLS(ctx(req), async (db) => db`
@@ -556,9 +559,10 @@ payrollRouter.post('/runs/:id/mark-paid', requireRole('owner', 'finance'), async
   const [run] = await withRLS(ctx(req), async (db) => db`
     SELECT * FROM payroll_runs WHERE id = ${req.params.id} AND company_id = ${ctx(req).companyId}
   `);
-  if (!run) return res.status(404).json({ success: false, error: 'Payroll run not found' });
+  if (!run) { res.status(404).json({ success: false, error: 'Payroll run not found' }); return; }
   if (run.status !== 'approved') {
-    return res.status(400).json({ success: false, error: 'Payroll run must be approved before marking as paid' });
+    res.status(400).json({ success: false, error: 'Payroll run must be approved before marking as paid' });
+    return;
   }
 
   await withRLSTransaction(ctx(req), async (sql) => {
@@ -615,7 +619,7 @@ payrollRouter.post('/runs/:id/cancel', requireRole('owner', 'finance'), async (r
       AND status IN ('draft', 'approved')
     RETURNING *
   `);
-  if (!updated) return res.status(404).json({ success: false, error: 'Payroll run not found or cannot be cancelled' });
+  if (!updated) { res.status(404).json({ success: false, error: 'Payroll run not found or cannot be cancelled' }); return; }
   res.json({ success: true, data: updated } satisfies ApiResponse);
 });
 
@@ -631,7 +635,7 @@ payrollRouter.post('/runs/:id/archive', requireRole('owner', 'finance'), async (
       AND status = 'cancelled'
     RETURNING id
   `);
-  if (!updated) return res.status(404).json({ success: false, error: 'Run not found or not in cancelled state' });
+  if (!updated) { res.status(404).json({ success: false, error: 'Run not found or not in cancelled state' }); return; }
   res.json({ success: true, data: { archived: true } } satisfies ApiResponse);
 });
 

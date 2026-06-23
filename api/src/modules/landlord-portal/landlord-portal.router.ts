@@ -8,6 +8,7 @@
 
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
+import type postgres from 'postgres';
 import { sql } from '../../db';
 import { authenticate } from '../../middleware/auth';
 import { ForbiddenError, NotFoundError } from '../../lib/errors';
@@ -249,7 +250,8 @@ landlordPortalRouter.post('/statements/:id/dispute', async (req: Request, res: R
     return;
   }
 
-  await sql.begin(async (tx) => {
+  await sql.begin(async (rawTx) => {
+    const tx = rawTx as unknown as postgres.Sql;
     await tx`
       INSERT INTO remittance_disputes (statement_id, landlord_id, reason, status)
       VALUES (${id}, ${landlord.id}, ${reason}, 'open')

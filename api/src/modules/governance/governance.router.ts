@@ -19,7 +19,7 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { withRLS, RLSContext } from '../../db';
 import { authenticate, requireRole } from '../../middleware/auth';
-import { alertExpenseReviewed, alertPaymentReversed, alertPayrollRunCreated, alertPayrollApproved, alertPayrollPaid } from '../../lib/alerts';
+import { alertExpenseReviewed, alertPaymentReversed } from '../../lib/alerts';
 import type { ApiResponse } from '../../types';
 
 export const governanceRouter = Router();
@@ -83,13 +83,15 @@ governanceRouter.post('/expenses/:id/approve', requireRole('owner', 'finance'), 
     SELECT * FROM expenses
     WHERE id = ${req.params.id} AND company_id = ${ctx(req).companyId}
   `);
-  if (!expense) return res.status(404).json({ success: false, error: 'Expense not found' });
+  if (!expense) { res.status(404).json({ success: false, error: 'Expense not found' }); return; }
   if (expense.approval_status !== 'pending') {
-    return res.status(400).json({ success: false, error: `Expense is already ${expense.approval_status}` });
+    res.status(400).json({ success: false, error: `Expense is already ${expense.approval_status}` });
+    return;
   }
   // Self-approval guard: submitter cannot approve their own expense (unless owner)
   if (expense.submitted_by === ctx(req).userId && ctx(req).userRole !== 'owner') {
-    return res.status(403).json({ success: false, error: 'You cannot approve an expense you submitted' });
+    res.status(403).json({ success: false, error: 'You cannot approve an expense you submitted' });
+    return;
   }
 
   const [updated] = await withRLS(ctx(req), async (db) => db`
@@ -123,9 +125,10 @@ governanceRouter.post('/expenses/:id/reject', requireRole('owner', 'finance'), a
   const [expense] = await withRLS(ctx(req), async (db) => db`
     SELECT * FROM expenses WHERE id = ${req.params.id} AND company_id = ${ctx(req).companyId}
   `);
-  if (!expense) return res.status(404).json({ success: false, error: 'Expense not found' });
+  if (!expense) { res.status(404).json({ success: false, error: 'Expense not found' }); return; }
   if (expense.approval_status !== 'pending') {
-    return res.status(400).json({ success: false, error: `Expense is already ${expense.approval_status}` });
+    res.status(400).json({ success: false, error: `Expense is already ${expense.approval_status}` });
+    return;
   }
 
   const [updated] = await withRLS(ctx(req), async (db) => db`
@@ -186,9 +189,9 @@ governanceRouter.post('/payments/:id/reverse', requireRole('owner', 'finance'), 
     JOIN monthly_bills b ON b.id = p.bill_id
     WHERE p.id = ${req.params.id} AND p.company_id = ${ctx(req).companyId}
   `);
-  if (!payment) return res.status(404).json({ success: false, error: 'Payment not found' });
-  if (payment.is_reversed) return res.status(400).json({ success: false, error: 'Payment already reversed' });
-  if (payment.undone_at) return res.status(400).json({ success: false, error: 'Payment was already undone' });
+  if (!payment) { res.status(404).json({ success: false, error: 'Payment not found' }); return; }
+  if (payment.is_reversed) { res.status(400).json({ success: false, error: 'Payment already reversed' }); return; }
+  if (payment.undone_at) { res.status(400).json({ success: false, error: 'Payment was already undone' }); return; }
 
   // Check period not locked for the payment's month
   const paymentMonth = payment.for_month
@@ -200,7 +203,8 @@ governanceRouter.post('/payments/:id/reverse', requireRole('owner', 'finance'), 
     WHERE company_id = ${ctx(req).companyId} AND period_month = ${paymentMonth}
   `);
   if (period?.status === 'locked') {
-    return res.status(400).json({ success: false, error: 'Cannot reverse a payment in a locked financial period' });
+    res.status(400).json({ success: false, error: 'Cannot reverse a payment in a locked financial period' });
+    return;
   }
 
   await withRLS(ctx(req), async (db) => {
@@ -264,7 +268,7 @@ governanceRouter.post('/periods', requireRole('owner', 'finance'), async (req: R
     SELECT id FROM financial_periods
     WHERE company_id = ${ctx(req).companyId} AND period_month = ${monthDate}
   `);
-  if (existing) return res.status(409).json({ success: false, error: 'Period already exists for this month' });
+  if (existing) { res.status(409).json({ success: false, error: 'Period already exists for this month' }); return; }
 
   const [period] = await withRLS(ctx(req), async (db) => db`
     INSERT INTO financial_periods (company_id, period_month, status)
@@ -279,7 +283,7 @@ governanceRouter.get('/periods/:id/pre-close-check', requireRole('owner', 'finan
   const [period] = await withRLS(ctx(req), async (db) => db`
     SELECT * FROM financial_periods WHERE id = ${req.params.id} AND company_id = ${ctx(req).companyId}
   `);
-  if (!period) return res.status(404).json({ success: false, error: 'Period not found' });
+  if (!period) { res.status(404).json({ success: false, error: 'Period not found' }); return; }
 
   const monthStart = new Date(period.period_month).toISOString().slice(0, 10); // ensure YYYY-MM-DD
   const [sy, sm] = monthStart.split('-').map(Number);
@@ -340,9 +344,10 @@ governanceRouter.post('/periods/:id/close', requireRole('owner', 'finance'), asy
   const [period] = await withRLS(ctx(req), async (db) => db`
     SELECT * FROM financial_periods WHERE id = ${req.params.id} AND company_id = ${ctx(req).companyId}
   `);
-  if (!period) return res.status(404).json({ success: false, error: 'Period not found' });
+  if (!period) { res.status(404).json({ success: false, error: 'Period not found' }); return; }
   if (period.status !== 'open' && period.status !== 'closing') {
-    return res.status(400).json({ success: false, error: `Period is already ${period.status}` });
+    res.status(400).json({ success: false, error: `Period is already ${period.status}` });
+    return;
   }
 
   const monthStart = new Date(period.period_month).toISOString().slice(0, 10);
@@ -369,10 +374,11 @@ governanceRouter.post('/periods/:id/close', requireRole('owner', 'finance'), asy
   if (Number(unmatchedRow?.count ?? 0) > 0) blockers.push('unmatched payments');
 
   if (blockers.length > 0) {
-    return res.status(400).json({
+    res.status(400).json({
       success: false,
       error: `Cannot close period: resolve ${blockers.join(' and ')} first`,
     });
+    return;
   }
 
   const [updated] = await withRLS(ctx(req), async (db) => db`
@@ -453,8 +459,8 @@ governanceRouter.post('/periods/:id/force-close', requireRole('owner'), async (r
   const [period] = await withRLS(ctx(req), async (db) => db`
     SELECT * FROM financial_periods WHERE id = ${req.params.id} AND company_id = ${ctx(req).companyId}
   `);
-  if (!period) return res.status(404).json({ success: false, error: 'Period not found' });
-  if (period.status === 'locked') return res.status(400).json({ success: false, error: 'Period is already locked' });
+  if (!period) { res.status(404).json({ success: false, error: 'Period not found' }); return; }
+  if (period.status === 'locked') { res.status(400).json({ success: false, error: 'Period is already locked' }); return; }
 
   const [updated] = await withRLS(ctx(req), async (db) => db`
     UPDATE financial_periods SET
@@ -496,9 +502,10 @@ governanceRouter.post('/periods/:id/lock', requireRole('owner'), async (req: Req
   const [period] = await withRLS(ctx(req), async (db) => db`
     SELECT * FROM financial_periods WHERE id = ${req.params.id} AND company_id = ${ctx(req).companyId}
   `);
-  if (!period) return res.status(404).json({ success: false, error: 'Period not found' });
+  if (!period) { res.status(404).json({ success: false, error: 'Period not found' }); return; }
   if (period.status !== 'closed') {
-    return res.status(400).json({ success: false, error: 'Period must be closed before locking' });
+    res.status(400).json({ success: false, error: 'Period must be closed before locking' });
+    return;
   }
 
   const [updated] = await withRLS(ctx(req), async (db) => db`
@@ -518,12 +525,14 @@ governanceRouter.post('/periods/:id/reopen', requireRole('owner'), async (req: R
   const [period] = await withRLS(ctx(req), async (db) => db`
     SELECT * FROM financial_periods WHERE id = ${req.params.id} AND company_id = ${ctx(req).companyId}
   `);
-  if (!period) return res.status(404).json({ success: false, error: 'Period not found' });
+  if (!period) { res.status(404).json({ success: false, error: 'Period not found' }); return; }
   if (period.status === 'locked') {
-    return res.status(400).json({ success: false, error: 'Locked periods cannot be reopened' });
+    res.status(400).json({ success: false, error: 'Locked periods cannot be reopened' });
+    return;
   }
   if (period.status === 'open') {
-    return res.status(400).json({ success: false, error: 'Period is already open' });
+    res.status(400).json({ success: false, error: 'Period is already open' });
+    return;
   }
 
   const [updated] = await withRLS(ctx(req), async (db) => db`
