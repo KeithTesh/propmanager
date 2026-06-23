@@ -1,6 +1,6 @@
 // web/src/pages/remittances/RemittancesPage.tsx
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { apiClient, getApiErrorMessage } from '../../lib/api';

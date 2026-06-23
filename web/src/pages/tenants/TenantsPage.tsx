@@ -1,6 +1,6 @@
 // web/src/pages/tenants/TenantsPage.tsx
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { apiClient, getApiErrorMessage } from '../../lib/api';
 

@@ -16,7 +16,7 @@ interface PendingExpense {
 interface ReversedPayment {
   id: string; amount: string; channel: string; reversed_at: string;
   reversal_reason: string; reversed_by_name?: string;
-  bill_month?: string; unit_number?: string; property_name?: string;
+  for_month?: string; unit_number?: string; property_name?: string;
   mpesa_receipt_number?: string; bank_transaction_ref?: string;
 }
 

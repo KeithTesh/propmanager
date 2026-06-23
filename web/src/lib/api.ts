@@ -12,7 +12,9 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import type { ApiError, AuthTokens } from '../types';
 
-const BASE_URL = '/api/v1';
+// In dev, Vite proxies relative /api/v1 to the local Express server (see vite.config.ts).
+// In prod, web (Vercel) and api (Render) are different domains, so this must be absolute.
+const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api/v1';
 
 export const apiClient = axios.create({
   baseURL: BASE_URL,

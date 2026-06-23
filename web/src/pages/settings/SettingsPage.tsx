@@ -52,11 +52,10 @@ function Row({ children }: { children: React.ReactNode }) {
 }
 
 export default function SettingsPage() {
-  const { company: authCompany, setCompany } = useAuthStore();
+  const { company: authCompany } = useAuthStore();
   const qc = useQueryClient();
   const [activeTab, setActiveTab] = useState<'profile'|'billing'|'proration'|'sms'|'password'|'subscription'>('profile');
   const [saving,  setSaving]  = useState(false);
-  const [sms, setSms] = useState({ atSenderId: '', atApiKey: '', atUsername: '' });
   const [saved,   setSaved]   = useState(false);
   const [error,   setError]   = useState('');
 
@@ -94,7 +93,6 @@ export default function SettingsPage() {
       paymentMethod: company.payment_method ?? 'cash',
       paybillNumber: company.paybill_number ?? '',
       paybillAccountFormat: company.paybill_account_format ?? '',
-      bankAccountNumber: company.bank_account_number ?? '',
       bankName: company.bank_name ?? '',
       bankAccountNumber: company.bank_account_number ?? '',
       bankBranch: company.bank_branch ?? '',
@@ -460,7 +458,6 @@ function SubscriptionTab() {
   const [plan, setPlan] = useState<'starter'|'growth'|'enterprise'>('growth');
   const [paying, setPaying] = useState(false);
   const [polling, setPolling] = useState(false);
-  const [paymentId, setPaymentId] = useState<string|null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['sub-status'],
@@ -485,7 +482,6 @@ function SubscriptionTab() {
     try {
       const r:any = await apiClient.post('/subscription/pay', { plan, phone });
       const pid = r.data.data.paymentId;
-      setPaymentId(pid);
       toast({ title: "M-Pesa prompt sent! Enter your PIN to complete.", variant: 'success' });
       setPolling(true);
       let tries = 0;
@@ -599,7 +595,6 @@ function SubscriptionTab() {
 
 // ─── SMS SETTINGS TAB ─────────────────────────────────────────────────────────
 function SmsSettingsTab() {
-  const { company: authCompany } = useAuthStore();
   const qc = useQueryClient();
 
   const [form, setForm] = useState({ senderId: '', atUsername: '', atApiKey: '', reason: '' });
@@ -619,7 +614,6 @@ function SmsSettingsTab() {
     queryFn: () => apiClient.get('/sms/usage').then((r: any) => r.data.data),
   });
 
-  const company = authCompany;
   const usedPct = usage ? Math.min(100, Math.round((usage.used / usage.quota) * 100)) : 0;
   const barColor = usedPct >= 90 ? '#ef4444' : usedPct >= 70 ? '#f59e0b' : '#0d9f9f';
 

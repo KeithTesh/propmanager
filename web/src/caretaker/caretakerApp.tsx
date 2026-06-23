@@ -326,7 +326,7 @@ function MaintenancePage({ user }: { user: CaretakerUser }) {
 
 // ─── NEW REQUEST FORM ─────────────────────────────────────────────────────────
 
-function NewRequestForm({ user, onBack }: { user: CaretakerUser; onBack: () => void }) {
+function NewRequestForm({ onBack }: { user: CaretakerUser; onBack: () => void }) {
   const [properties, setProperties] = useState<Property[]>([]);
   const [units, setUnits]           = useState<Unit[]>([]);
   const [propId, setPropId]         = useState('');

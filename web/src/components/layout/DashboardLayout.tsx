@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Outlet, NavLink, Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '../../stores/authStore';
-import { getRoleLabel, getAccountTypeBadge } from '../../lib/roles';
+import { getRoleLabel } from '../../lib/roles';
 import { apiClient } from '../../lib/api';
 
 const NAV = [

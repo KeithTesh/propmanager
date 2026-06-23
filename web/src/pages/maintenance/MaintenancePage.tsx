@@ -150,7 +150,7 @@ function CreateModal({ properties, onClose, onSaved }: {
 }
 
 function RequestCard({ req, onUpdate }: { req: MaintenanceRequest; onUpdate: () => void }) {
-  const [expanded, setExpanded] = useState(false);
+  const { toast } = useToast();
   const [updating, setUpdating] = useState(false);
   const [notes, setNotes] = useState(req.resolution_notes ?? '');
 
@@ -240,7 +240,6 @@ function RequestCard({ req, onUpdate }: { req: MaintenanceRequest; onUpdate: () 
 }
 
 export default function MaintenancePage() {
-  const { toast } = useToast();
   const qc = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
   const [filterStatus,   setFilterStatus]   = useState('');

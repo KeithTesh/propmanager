@@ -429,7 +429,7 @@ export default function PaymentsPage() {
   const qc = useQueryClient();
   const [tab,      setTab]      = useState<'bills' | 'history'>('bills');
   const [paying,   setPaying]   = useState<Bill | null>(null);
-  const [billFilter, setBillFilter] = useState<'unpaid' | 'all'>('unpaid');
+  const [billFilter] = useState<'unpaid' | 'all'>('unpaid');
 
   const { data: bills, isLoading: loadingBills } = useQuery({
     queryKey: ['bills', billFilter],

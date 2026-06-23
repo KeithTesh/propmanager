@@ -53,7 +53,6 @@ export default function PortalHome() {
 
   const tenant = meData?.tenant;
   const recentBills: any[] = billsData?.bills ?? [];
-  const _currentBill = recentBills[0] ?? null; // kept for future use
   const hasOutstanding = recentBills.some((b: any) => ['open','partial','overdue'].includes(b.status));
 
   return (

@@ -293,7 +293,7 @@ export default function AuditPage() {
                             KES {Number(log.new_values.amount).toLocaleString('en-KE')}
                           </span>
                         )}
-                        {log.table_name === 'leases' && log.new_values.status && (
+                        {log.table_name === 'leases' && Boolean(log.new_values.status) && (
                           <span className="text-xs bg-purple-50 text-purple-700 border border-purple-100 px-2 py-0.5 rounded-full font-medium capitalize">
                             {String(log.new_values.status)}
                           </span>

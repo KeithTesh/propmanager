@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useAuthStore } from '../../stores/authStore';
 import { apiClient, getApiErrorMessage } from '../../lib/api';
 import { toast } from '../../components/ui/toaster';
 

@@ -1,5 +1,5 @@
 // web/src/components/ui/ConfirmDialog.tsx
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 
 interface ConfirmOptions {
   title: string;

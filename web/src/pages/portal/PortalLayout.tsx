@@ -6,7 +6,6 @@ import { useState } from 'react';
 import axios from 'axios';
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
-import { apiClient } from '../../lib/api';
 
 const NAV = [
   {

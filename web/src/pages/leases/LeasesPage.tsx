@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient, getApiErrorMessage } from '../../lib/api';
+import { useToast } from '../../components/ui/Toast';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -15,7 +16,6 @@ interface Lease {
   start_date: string; end_date: string | null;
   outstanding_balance: string; days_remaining: number | null;
   snap_account_reference: string;
-  deposit_amount: string;
   deposit_paid_amount: string;
   deposit_paid_at: string | null;
   created_at: string;
@@ -43,11 +43,12 @@ const STATUS_STYLES: Record<string, string> = {
 
 // ─── Lease Card ───────────────────────────────────────────────────────────────
 
-function LeaseCard({ lease, onTerminate, onNotice, onDeposit }: {
+function LeaseCard({ lease, onTerminate, onNotice, onDeposit, onRenew }: {
   lease: Lease;
   onTerminate: (l: Lease) => void;
   onNotice:    (l: Lease) => void;
   onDeposit:   (l: Lease) => void;
+  onRenew:     (l: Lease) => void;
 }) {
   const outstanding = parseFloat(lease.outstanding_balance);
   const isActive    = lease.status === 'active';
@@ -743,14 +744,6 @@ export default function LeasesPage() {
   const [noticing,    setNoticing]    = useState<Lease | null>(null);
   const [renewing,    setRenewing]    = useState<Lease | null>(null);
   const [filter,      setFilter]      = useState<'all' | 'active' | 'notice' | 'terminated'>('all');
-
-  const { data: expiringData } = useQuery({
-    queryKey: ['leases-expiring'],
-    queryFn: async () => {
-      const res = await apiClient.get<{ data: { leases: any[] } }>('/leases/expiring?days=60');
-      return res.data.data.leases;
-    },
-  });
 
   const { data, isLoading } = useQuery({
     queryKey: ['leases'],

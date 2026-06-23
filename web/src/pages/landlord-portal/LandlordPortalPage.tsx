@@ -3,6 +3,7 @@
 // No sidebar. Top nav only. All data scoped to their landlord record.
 
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient, getApiErrorMessage } from '../../lib/api';
 import { useAuthStore } from '../../stores/authStore';
@@ -477,8 +478,18 @@ function Spinner() {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function LandlordPortalPage() {
-  const { logout } = useAuthStore();
+  const { clearAuth } = useAuthStore();
+  const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>('overview');
+
+  async function logout() {
+    try {
+      await apiClient.post('/auth/logout', {}, { withCredentials: true });
+    } finally {
+      clearAuth();
+      navigate('/login', { replace: true });
+    }
+  }
 
   const { data: meData } = useQuery({
     queryKey: ['lp-me'],

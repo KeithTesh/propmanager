@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { apiClient, getApiErrorMessage } from '../../lib/api';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
-import { useToast } from '../../components/ui/Toast';
+import { toast } from '../../components/ui/toaster';
 
 interface Stats {
   total_companies: string; active: string; trialing: string;
@@ -66,7 +66,6 @@ const ACCT_BADGE: Record<string, { label: string; bg: string; color: string }> =
 export default function SuperAdminPage() {
   const qc = useQueryClient();
   const { confirm } = useConfirm();
-  const { toast } = useToast();
   const [tab, setTab]         = useState<'companies' | 'events' | 'pending' | 'settings' | 'deleted' | 'sms'>('companies');
   const [search, setSearch]   = useState('');
   const [statusFilter, setStatusFilter] = useState('');

@@ -135,7 +135,6 @@ export default function ExpensesPage() {
     setChargeExpense(e);
     setChargeMode(e.unit_id ? 'single' : e.property_id ? 'each' : 'single');
     setChargeMonth(new Date().toISOString().slice(0, 7) + '-01');
-    setChargeDue(new Date().toISOString().slice(0, 10));
     setChargeDesc('');
     setChargeResult(null);
     setChargeError('');

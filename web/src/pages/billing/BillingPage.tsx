@@ -58,7 +58,6 @@ function Spinner() {
 export default function BillingPage() {
   const qc = useQueryClient();
   const now = new Date();
-  const [sendSmsOnRecalc, setSendSmsOnRecalc] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(
     new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 7)
   );

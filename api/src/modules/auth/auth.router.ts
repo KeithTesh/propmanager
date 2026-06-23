@@ -9,10 +9,13 @@ import type { ApiResponse } from '../../types';
 export const authRouter = Router();
 
 const REFRESH_COOKIE = 'pm_refresh';
+const isProd = process.env.NODE_ENV === 'production';
 const COOKIE_OPTIONS = {
   httpOnly: true,
-  secure:   process.env.NODE_ENV === 'production',
-  sameSite: 'lax' as const,
+  secure:   isProd,
+  // Web (Vercel) and API (Render) are different domains in production, so the
+  // refresh cookie must be sent cross-site. 'none' requires secure: true.
+  sameSite: (isProd ? 'none' : 'lax') as const,
   maxAge:   7 * 24 * 60 * 60 * 1000,
   path:     '/',
 };
