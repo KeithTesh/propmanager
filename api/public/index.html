@@ -438,7 +438,7 @@ footer{background:#060f1e;color:rgba(255,255,255,.5);padding:60px 24px 32px}
     <div class="pricing-toggle">
       <span>Monthly</span>
       <div class="toggle-switch" id="pricingToggle"></div>
-      <span>Annual <span class="pricing-save">Save 20%</span></span>
+      <span>Annual <span class="pricing-save" id="annualSaveLabel">Save 20%</span></span>
     </div>
 
     <!-- Landlord plans (default) -->
@@ -446,7 +446,7 @@ footer{background:#060f1e;color:rgba(255,255,255,.5);padding:60px 24px 32px}
       <div class="plan-card">
         <div class="plan-name">Starter</div>
         <div class="plan-desc">For landlords getting started with up to 50 units.</div>
-        <div class="plan-price-amount">KES <span class="price-val" data-monthly="2,500" data-annual="2,000">2,500</span></div>
+        <div class="plan-price-amount">KES <span class="price-val" data-plan="starter" data-monthly="2,500" data-annual="2,000">2,500</span></div>
         <div class="plan-price-period">per month · up to 50 units</div>
         <ul class="plan-features"><li>Up to 50 units</li><li>Billing &amp; rent collection</li><li>Tenant portal</li><li><span class="dyn-sms">500</span> SMS / month</li><li>Basic reports</li><li>Maintenance tracking</li><li class="no">Payroll management</li><li class="no">Custom SMS sender ID</li></ul>
         <button class="plan-cta outline btnOpenSignup">Start Free Trial</button>
@@ -455,7 +455,7 @@ footer{background:#060f1e;color:rgba(255,255,255,.5);padding:60px 24px 32px}
         <div class="plan-badge">Most Popular</div>
         <div class="plan-name">Growth</div>
         <div class="plan-desc">For property managers running a portfolio of multiple properties.</div>
-        <div class="plan-price-amount">KES <span class="price-val" data-monthly="5,500" data-annual="4,400">5,500</span></div>
+        <div class="plan-price-amount">KES <span class="price-val" data-plan="growth" data-monthly="5,500" data-annual="4,400">5,500</span></div>
         <div class="plan-price-period">per month · up to 200 units</div>
         <ul class="plan-features"><li>Up to 200 units</li><li>Everything in Starter</li><li>Payroll management</li><li>1,500 SMS / month</li><li>Advanced reports + PDF/Excel export</li><li>Custom SMS sender ID</li><li>Caretaker PWA app</li><li>Priority support</li></ul>
         <button class="plan-cta primary btnOpenSignup">Start Free Trial</button>
@@ -463,7 +463,7 @@ footer{background:#060f1e;color:rgba(255,255,255,.5);padding:60px 24px 32px}
       <div class="plan-card">
         <div class="plan-name">Enterprise</div>
         <div class="plan-desc">For large portfolios, agencies and property management companies.</div>
-        <div class="plan-price-amount">KES <span class="price-val" data-monthly="12,000" data-annual="9,600">12,000</span></div>
+        <div class="plan-price-amount">KES <span class="price-val" data-plan="enterprise" data-monthly="12,000" data-annual="9,600">12,000</span></div>
         <div class="plan-price-period">per month · unlimited units</div>
         <ul class="plan-features"><li>Unlimited units</li><li>Everything in Growth</li><li>Unlimited SMS</li><li>White-label option</li><li>Dedicated account manager</li><li>Custom integrations</li><li>SLA &amp; uptime guarantee</li><li>On-site training</li></ul>
         <a href="https://wa.me/254700000000?text=Hi%2C%20I'm%20interested%20in%20PropManager%20Enterprise" class="plan-cta outline" target="_blank" style="display:block">Contact Sales</a>
@@ -476,7 +476,7 @@ footer{background:#060f1e;color:rgba(255,255,255,.5);padding:60px 24px 32px}
       <div class="plan-card">
         <div class="plan-name">Starter Agent</div>
         <div class="plan-desc">For small agencies managing up to 100 units across landlord clients.</div>
-        <div class="plan-price-amount">KES <span class="price-val agent-price" data-monthly="3,500" data-annual="2,800">3,500</span></div>
+        <div class="plan-price-amount">KES <span class="price-val agent-price" data-plan="agent_starter" data-monthly="3,500" data-annual="2,800">3,500</span></div>
         <div class="plan-price-period">per month · up to 100 units</div>
         <ul class="plan-features"><li>Up to 100 units total</li><li>Landlord client management</li><li>Monthly remittance statements</li><li>Commission tracking</li><li>Landlord read-only portal</li><li>500 SMS / month</li><li>Billing &amp; rent collection</li></ul>
         <button class="plan-cta outline btnOpenSignupAgent">Start Free Trial</button>
@@ -485,7 +485,7 @@ footer{background:#060f1e;color:rgba(255,255,255,.5);padding:60px 24px 32px}
         <div class="plan-badge">Most Popular</div>
         <div class="plan-name">Growth Agent</div>
         <div class="plan-desc">For growing agencies managing multiple landlords and large portfolios.</div>
-        <div class="plan-price-amount">KES <span class="price-val agent-price" data-monthly="7,500" data-annual="6,000">7,500</span></div>
+        <div class="plan-price-amount">KES <span class="price-val agent-price" data-plan="agent_growth" data-monthly="7,500" data-annual="6,000">7,500</span></div>
         <div class="plan-price-period">per month · up to 500 units</div>
         <ul class="plan-features"><li>Up to 500 units total</li><li>Everything in Starter Agent</li><li>PDF remittance statements</li><li>Commission overrides per property</li><li>Dispute management</li><li>1,500 SMS / month</li><li>Payroll management</li><li>Custom SMS sender ID</li></ul>
         <button class="plan-cta primary btnOpenSignupAgent">Start Free Trial</button>
@@ -493,7 +493,7 @@ footer{background:#060f1e;color:rgba(255,255,255,.5);padding:60px 24px 32px}
       <div class="plan-card">
         <div class="plan-name">Enterprise Agent</div>
         <div class="plan-desc">For large agencies managing unlimited units across any number of landlords.</div>
-        <div class="plan-price-amount">KES <span class="price-val agent-price" data-monthly="15,000" data-annual="12,000">15,000</span></div>
+        <div class="plan-price-amount">KES <span class="price-val agent-price" data-plan="agent_enterprise" data-monthly="15,000" data-annual="12,000">15,000</span></div>
         <div class="plan-price-period">per month · unlimited units</div>
         <ul class="plan-features"><li>Unlimited units</li><li>Everything in Growth Agent</li><li>Unlimited SMS</li><li>White-label landlord portal</li><li>Dedicated account manager</li><li>Custom integrations</li><li>SLA &amp; uptime guarantee</li><li>On-site training</li></ul>
         <a href="https://wa.me/254700000000?text=Hi%2C%20I'm%20interested%20in%20PropManager%20Enterprise%20Agent" class="plan-cta outline" target="_blank" style="display:block">Contact Sales</a>
@@ -831,9 +831,25 @@ footer{background:#060f1e;color:rgba(255,255,255,.5);padding:60px 24px 32px}
       var s=(d.data&&d.data.settings)||{};
       if(s.trial_days) document.querySelectorAll('.dyn-trial').forEach(function(el){el.textContent=s.trial_days;});
       if(s.default_sms_quota) document.querySelectorAll('.dyn-sms').forEach(function(el){el.textContent=Number(s.default_sms_quota).toLocaleString();});
-      if(s.starter_price) document.querySelectorAll('[data-monthly="2,500"]').forEach(function(el){var v=Number(s.starter_price).toLocaleString();el.textContent=v;el.dataset.monthly=v;el.dataset.annual=Math.round(Number(s.starter_price)*.8).toLocaleString();});
-      if(s.growth_price)  document.querySelectorAll('[data-monthly="5,500"]').forEach(function(el){var v=Number(s.growth_price).toLocaleString();el.textContent=v;el.dataset.monthly=v;el.dataset.annual=Math.round(Number(s.growth_price)*.8).toLocaleString();});
-      if(s.enterprise_price) document.querySelectorAll('[data-monthly="12,000"]').forEach(function(el){var v=Number(s.enterprise_price).toLocaleString();el.textContent=v;el.dataset.monthly=v;el.dataset.annual=Math.round(Number(s.enterprise_price)*.8).toLocaleString();});
+
+      var discountPct = Number(s.annual_discount_percent ?? 20);
+      var saveLabel = document.getElementById('annualSaveLabel');
+      if(saveLabel) saveLabel.textContent = 'Save ' + discountPct + '%';
+
+      var planPrices = {
+        starter: s.starter_price, growth: s.growth_price, enterprise: s.enterprise_price,
+        agent_starter: s.agent_starter_price, agent_growth: s.agent_growth_price, agent_enterprise: s.agent_enterprise_price
+      };
+      Object.keys(planPrices).forEach(function(plan){
+        var price = planPrices[plan];
+        if(!price) return;
+        document.querySelectorAll('[data-plan="' + plan + '"]').forEach(function(el){
+          var v = Number(price).toLocaleString();
+          el.textContent = v;
+          el.dataset.monthly = v;
+          el.dataset.annual = Math.round(Number(price) * (1 - discountPct / 100)).toLocaleString();
+        });
+      });
     } catch(e){}
   })();
 

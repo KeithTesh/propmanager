@@ -29,7 +29,8 @@ async function getSetting(key: string, fallback: string): Promise<string> {
 
 registerRouter.get('/settings', async (_req: Request, res: Response) => {
   const keys = ['trial_days','default_sms_quota','starter_price','growth_price',
-    'enterprise_price','starter_units','growth_units','whatsapp_number','support_email'];
+    'enterprise_price','starter_units','growth_units','whatsapp_number','support_email',
+    'agent_starter_price','agent_growth_price','agent_enterprise_price','annual_discount_percent'];
 
   const rows = await sql`SELECT key, value FROM platform_settings WHERE key = ANY(${keys})`;
   const settings: Record<string, string> = {};
