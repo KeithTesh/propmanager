@@ -585,7 +585,7 @@ function SubscriptionTab() {
       <div className="bg-teal-50 rounded-xl p-4">
         <p className="text-sm text-gray-600">
           Need help with your subscription?{' '}
-          <a href="https://wa.me/254700000000?text=Hi%2C%20I%20need%20help%20with%20my%20PropManager%20subscription"
+          <a href="https://wa.me/254759604215?text=Hi%2C%20I%20need%20help%20with%20my%20PropManager%20subscription"
             target="_blank" className="text-teal-600 font-semibold hover:underline">WhatsApp us →</a>
         </p>
       </div>

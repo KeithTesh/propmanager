@@ -19,7 +19,7 @@ INSERT INTO platform_settings (key, value, description) VALUES
   ('enterprise_price',     '12000','Enterprise plan monthly price in KES'),
   ('starter_units',        '50',   'Max units on Starter plan'),
   ('growth_units',         '200',  'Max units on Growth plan'),
-  ('whatsapp_number',      '254700000000', 'WhatsApp support number'),
+  ('whatsapp_number',      '254759604215', 'WhatsApp support number'),
   ('support_email',        'support@propmanager.co.ke', 'Support email address')
 ON CONFLICT (key) DO NOTHING;
 
