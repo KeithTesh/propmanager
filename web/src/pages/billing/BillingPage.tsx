@@ -59,7 +59,7 @@ export default function BillingPage() {
   const qc = useQueryClient();
   const now = new Date();
   const [selectedMonth, setSelectedMonth] = useState(
-    new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 7)
+    `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
   );
   const [generating,      setGenerating]      = useState(false);
   const [fixing,          setFixing]          = useState(false);
