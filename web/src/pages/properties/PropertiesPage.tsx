@@ -4,14 +4,16 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient, getApiErrorMessage } from '../../lib/api';
+import { useAuthStore } from '../../stores/authStore';
 
 interface Property {
   id: string; name: string; address: string | null; county: string | null;
   description: string | null; total_units: number | null; is_active: boolean;
   unit_count: string; occupied_count: string; vacant_count: string; created_at: string;
+  landlord_id: string | null; landlord_name: string | null;
 }
 interface PropertyFormData {
-  name: string; address: string; county: string; description: string; totalUnits: string;
+  name: string; address: string; county: string; description: string; totalUnits: string; landlordId: string;
 }
 
 const COUNTIES = ['Nairobi','Mombasa','Kisumu','Nakuru','Eldoret','Thika','Malindi',
@@ -22,7 +24,7 @@ const COUNTIES = ['Nairobi','Mombasa','Kisumu','Nakuru','Eldoret','Thika','Malin
   'Taita-Taveta','Makueni','Kitui','Tharaka-Nithi','Isiolo','Marsabit','Wajir',
   'Mandera','Turkana','West Pokot'];
 
-const EMPTY: PropertyFormData = { name:'', address:'', county:'', description:'', totalUnits:'' };
+const EMPTY: PropertyFormData = { name:'', address:'', county:'', description:'', totalUnits:'', landlordId:'' };
 const inputCls = "w-full px-3.5 py-2.5 rounded-lg border border-gray-200 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition placeholder-gray-400";
 
 // ─── OccupancyBar ─────────────────────────────────────────────────────────────
@@ -66,6 +68,7 @@ function PropertyCard({ p, onEdit, onDelete, onClick }: {
               {(p.address || p.county) && (
                 <p className="text-xs text-gray-400 mt-0.5 truncate">{[p.address,p.county].filter(Boolean).join(', ')}</p>
               )}
+              {p.landlord_name && <p className="text-xs text-teal-700 mt-1 truncate">Landlord: {p.landlord_name}</p>}
             </div>
           </div>
           <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" onClick={e=>e.stopPropagation()}>
@@ -97,8 +100,18 @@ function PropertyCard({ p, onEdit, onDelete, onClick }: {
 
 // ─── Property Modal ───────────────────────────────────────────────────────────
 function PropertyModal({ editing, onClose, onSaved }: { editing:Property|null; onClose:()=>void; onSaved:()=>void }) {
+  const company = useAuthStore(s => s.company);
+  const isAgent = (company as (typeof company & { accountType?: string }))?.accountType === 'agent';
+  const landlordsQuery = useQuery({
+    queryKey: ['landlords'],
+    queryFn: async () => {
+      const res = await apiClient.get<{ data: { landlords: { id: string; full_name: string }[] } }>('/landlords');
+      return res.data.data.landlords;
+    },
+    enabled: isAgent,
+  });
   const [form, setForm] = useState<PropertyFormData>(editing
-    ? { name:editing.name, address:editing.address??'', county:editing.county??'', description:editing.description??'', totalUnits:editing.total_units?.toString()??'' }
+    ? { name:editing.name, address:editing.address??'', county:editing.county??'', description:editing.description??'', totalUnits:editing.total_units?.toString()??'', landlordId:editing.landlord_id??'' }
     : EMPTY);
   const [error,setError] = useState('');
   const [loading,setLoading] = useState(false);
@@ -109,7 +122,8 @@ function PropertyModal({ editing, onClose, onSaved }: { editing:Property|null; o
     setError(''); setLoading(true);
     try {
       const payload = { name:form.name.trim(), address:form.address||null, county:form.county||null,
-        description:form.description||null, totalUnits:form.totalUnits?parseInt(form.totalUnits):null };
+        description:form.description||null, totalUnits:form.totalUnits?parseInt(form.totalUnits):null,
+        ...(isAgent ? { landlordId:form.landlordId || null } : {}) };
       editing ? await apiClient.patch(`/properties/${editing.id}`, payload)
               : await apiClient.post('/properties', payload);
       onSaved();
@@ -156,10 +170,34 @@ function PropertyModal({ editing, onClose, onSaved }: { editing:Property|null; o
             <textarea value={form.description} onChange={e=>set('description',e.target.value)} rows={2}
               placeholder="Optional notes…" className={inputCls+' resize-none'} />
           </div>
+          {isAgent && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Landlord</label>
+              {landlordsQuery.isError ? (
+                <div className="text-sm text-red-700">
+                  <p>Could not load landlord clients: {getApiErrorMessage(landlordsQuery.error)}</p>
+                  <button type="button" onClick={() => landlordsQuery.refetch()} className="mt-1 font-semibold underline">
+                    Try again
+                  </button>
+                </div>
+              ) : (
+                <select value={form.landlordId} onChange={e=>set('landlordId',e.target.value)}
+                  disabled={landlordsQuery.isLoading} className={inputCls+' bg-white disabled:bg-gray-50'}>
+                  <option value="">{landlordsQuery.isLoading ? 'Loading landlord clients…' : 'No landlord assigned'}</option>
+                  {(landlordsQuery.data ?? []).map(landlord => (
+                    <option key={landlord.id} value={landlord.id}>{landlord.full_name}</option>
+                  ))}
+                </select>
+              )}
+              {!landlordsQuery.isLoading && landlordsQuery.data?.length === 0 && (
+                <p className="text-xs text-gray-500 mt-1">Add a landlord client before assigning one to this property.</p>
+              )}
+            </div>
+          )}
         </div>
         <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-100 bg-gray-50">
           <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 transition">Cancel</button>
-          <button onClick={submit} disabled={loading}
+          <button onClick={submit} disabled={loading || (isAgent && landlordsQuery.isLoading)}
             className="px-5 py-2 rounded-lg text-sm font-semibold text-white transition disabled:opacity-60 flex items-center gap-2"
             style={{ background:'#0d9f9f' }}>
             {loading && <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>}

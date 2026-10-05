@@ -171,7 +171,10 @@ propertiesRouter.patch('/:id', async (req: Request, res: Response) => {
         county                 = COALESCE(${data.county ?? null}, county),
         description            = COALESCE(${data.description ?? null}, description),
         total_units            = COALESCE(${data.totalUnits ?? null}, total_units),
-        landlord_id            = COALESCE(${data.landlordId ?? null}, landlord_id),
+        landlord_id            = CASE
+          WHEN ${data.landlordId !== undefined} THEN ${data.landlordId ?? null}::uuid
+          ELSE landlord_id
+        END,
         is_active              = COALESCE(${data.isActive ?? null}, is_active),
         payment_method_override= COALESCE(${data.paymentMethodOverride ?? null}, payment_method_override),
         paybill_override       = COALESCE(${data.paybillOverride ?? null}, paybill_override),
