@@ -18,8 +18,58 @@ function normalizeHeaders(values: unknown[]): string[] {
   });
 }
 
-function rowsToRecords(values: unknown[][]): Record<string, string>[] {
-  const [headerRow, ...dataRows] = values;
+interface StatementRow {
+  values: unknown[];
+  hasColoredCells?: boolean;
+}
+
+const HEADER_PATTERNS: Record<string, RegExp> = {
+  date: /\b(date|dated|time|timestamp)\b/,
+  amount: /\b(amount|credit|deposit|received|paid|payment|money in|paid in)\b/,
+  reference: /\b(ref|reference|transaction id|transaction no|receipt|cheque|check no|code)\b/,
+  payer: /\b(payer|sender|tenant|customer|name|description|narration|remarks?|details|particulars)\b/,
+  account: /\b(account|acct|a\/c)\b/,
+  phone: /\b(phone|mobile|msisdn|telephone)\b/,
+};
+
+function headerScore(row: StatementRow): number {
+  const cells = row.values.map(value => String(value ?? '').trim().toLowerCase()).filter(Boolean);
+  if (!cells.length) return 0;
+
+  const categories = new Set<string>();
+  let score = 0;
+  for (const cell of cells) {
+    for (const [category, pattern] of Object.entries(HEADER_PATTERNS)) {
+      if (pattern.test(cell)) {
+        categories.add(category);
+        break;
+      }
+    }
+    if (/\b(date|dated|time|timestamp)\b/.test(cell)) score += 4;
+    if (/\b(credit|amount|deposit|received|paid|payment|money in|paid in)\b/.test(cell)) score += 4;
+    if (/\b(ref|reference|transaction|receipt|cheque|check|code)\b/.test(cell)) score += 2;
+    if (/\b(payer|sender|tenant|customer|name|description|narration|remarks?|details|particulars|account|acct|phone|mobile)\b/.test(cell)) score += 1;
+  }
+
+  if (categories.has('date') && categories.has('amount')) score += 4;
+  if (row.hasColoredCells && cells.length >= 2) score += 5;
+  return score;
+}
+
+function rowsToRecords(rows: StatementRow[]): Record<string, string>[] {
+  const candidates = rows
+    .map((row, index) => ({ row, index, score: headerScore(row) }))
+    .filter(candidate => candidate.row.values.some(value => String(value ?? '').trim()))
+    .slice(0, 100);
+  const bestCandidate = candidates.reduce<typeof candidates[number] | null>(
+    (best, candidate) => candidate.score > (best?.score ?? 0) ? candidate : best,
+    null
+  );
+  const headerIndex = bestCandidate && bestCandidate.score >= 4
+    ? bestCandidate.index
+    : candidates[0]?.index;
+  const headerRow = headerIndex === undefined ? undefined : rows[headerIndex]?.values;
+  const dataRows = headerIndex === undefined ? [] : rows.slice(headerIndex + 1).map(row => row.values);
   if (!headerRow?.some(value => String(value ?? '').trim())) {
     throw new StatementFileError('The file must contain a header row and transaction rows.');
   }
@@ -62,12 +112,13 @@ export async function parseStatementFile(
 
   try {
     if (extension === 'csv') {
-      const rows = parseCsv(contents, {
+      const parsedRows = parseCsv(contents, {
         bom: true,
         relax_column_count: true,
         skip_empty_lines: true,
         trim: true,
       }) as string[][];
+      const rows = parsedRows.map(values => ({ values }));
       return rowsToRecords(rows);
     }
 
@@ -79,13 +130,16 @@ export async function parseStatementFile(
       const worksheet = workbook.worksheets[0];
       if (!worksheet) throw new StatementFileError('The Excel workbook has no worksheets.');
 
-      const rows: unknown[][] = [];
+      const rows: StatementRow[] = [];
       worksheet.eachRow({ includeEmpty: false }, row => {
         const values: unknown[] = [];
+        let hasColoredCells = false;
         for (let column = 1; column <= row.cellCount; column++) {
-          values[column - 1] = normalizeExcelValue(row.getCell(column).value);
+          const cell = row.getCell(column);
+          values[column - 1] = normalizeExcelValue(cell.value);
+          if (cell.fill?.type) hasColoredCells = true;
         }
-        rows.push(values);
+        rows.push({ values, hasColoredCells });
       });
       return rowsToRecords(rows);
     }

@@ -28,6 +28,32 @@ describe('parseStatementFile', () => {
     ]);
   });
 
+  it('finds a colored header row below title rows and keeps every column', async () => {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Statement');
+    worksheet.addRow(['Bank Transaction Statement']);
+    worksheet.addRow([]);
+    const header = worksheet.addRow(['Txn Date', 'Credit (KES)', 'Transaction ID', 'Narration', 'Branch Code']);
+    header.eachCell(cell => {
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF00A0A0' } };
+    });
+    worksheet.addRow([new Date(2026, 9, 1), 1200, 'TX-001', 'Jane Doe rent', '001']);
+    const bytes = await workbook.xlsx.writeBuffer();
+
+    const rows = await parseStatementFile('statement.xlsx', Buffer.from(bytes));
+
+    expect(Object.keys(rows[0])).toEqual([
+      'Txn Date', 'Credit (KES)', 'Transaction ID', 'Narration', 'Branch Code',
+    ]);
+    expect(rows).toEqual([{
+      'Txn Date': '2026-10-01',
+      'Credit (KES)': '1200',
+      'Transaction ID': 'TX-001',
+      Narration: 'Jane Doe rent',
+      'Branch Code': '001',
+    }]);
+  });
+
   it('rejects unsupported file types', async () => {
     await expect(parseStatementFile('statement.xls', Buffer.from('data')))
       .rejects.toBeInstanceOf(StatementFileError);

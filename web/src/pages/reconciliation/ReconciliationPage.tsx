@@ -36,6 +36,14 @@ const BANK_COLUMNS: Record<string, { date: string; ref: string; amount: string; 
   'Custom':       { date: 'date',        ref: 'ref',              amount: 'amount',        payer: 'payer', phone: 'phone' },
 };
 
+function findHeader(headers: string[], patterns: RegExp[], exclude?: RegExp): string {
+  for (const pattern of patterns) {
+    const match = headers.find(header => pattern.test(header) && !exclude?.test(header));
+    if (match) return match;
+  }
+  return '';
+}
+
 export default function ReconciliationPage() {
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -84,13 +92,14 @@ export default function ReconciliationPage() {
       if (rows.length > 0) {
         const suggested = BANK_COLUMNS[bankName] ?? BANK_COLUMNS['Custom'];
         const headers   = Object.keys(rows[0]);
+        const exactSuggestion = (value: string) => headers.find(header => header.toLowerCase() === value.toLowerCase()) ?? '';
         const mapped: Record<string, string> = {
-          transactionDate: headers.find(h => h.toLowerCase().includes('date')) ?? suggested.date,
-          transactionRef:  headers.find(h => h.toLowerCase().includes('ref') || h.toLowerCase().includes('id')) ?? suggested.ref,
-          amount:          headers.find(h => h.toLowerCase().includes('credit') || h.toLowerCase().includes('amount')) ?? suggested.amount,
-          payerName:       headers.find(h => h.toLowerCase().includes('remark') || h.toLowerCase().includes('narr') || h.toLowerCase().includes('desc')) ?? suggested.payer,
-          payerReference:  headers.find(h => h.toLowerCase().includes('account') || h.toLowerCase().includes('acc')) ?? '',
-          payerPhone:      headers.find(h => h.toLowerCase().includes('phone') || h.toLowerCase().includes('mobile')) ?? '',
+          transactionDate: findHeader(headers, [/\b(value|transaction|trans|posted|posting|effective)\s*date\b/i, /\bdate\b/i]) || exactSuggestion(suggested.date),
+          transactionRef:  findHeader(headers, [/\btransaction\s*(id|ref|reference|no|number)\b/i, /\b(ref|reference|receipt|cheque|check)\b/i, /\b(id|code)\b/i]) || exactSuggestion(suggested.ref),
+          amount:          findHeader(headers, [/\bcredit\s*amount\b/i, /\bcredit\b/i, /\b(amount|payment|paid|received|deposit)\b/i], /\b(debit|withdraw|fee|charge|outflow)\b/i) || exactSuggestion(suggested.amount),
+          payerName:       findHeader(headers, [/\b(payer|sender|tenant|customer)\s*name\b/i, /\b(name|description|narration|remarks?|details|particulars)\b/i]) || exactSuggestion(suggested.payer),
+          payerReference:  findHeader(headers, [/\b(account|acct|a\/c)\s*(no|number|ref|reference)?\b/i, /\b(payer|customer)\s*(ref|reference)\b/i]),
+          payerPhone:      findHeader(headers, [/\b(phone|mobile|msisdn|telephone)\b/i]),
         };
         setColMap(mapped);
       }
