@@ -166,17 +166,29 @@ landlordsRouter.get('/:id', async (req: Request, res: Response) => {
   // This month summary
   const [monthStats] = await withRLS(c, async (db) => db`
     SELECT
-      COALESCE(SUM(b.amount), 0)                              AS total_billed,
-      COALESCE(SUM(pay.amount) FILTER (
-        WHERE pay.undone_at IS NULL
-      ), 0)                                                   AS total_collected
-    FROM properties p
-    JOIN units u          ON u.property_id = p.id AND u.deleted_at IS NULL
-    JOIN leases lse       ON lse.unit_id = u.id AND lse.status = 'active'
-    JOIN monthly_bills b  ON b.lease_id = lse.id
-      AND DATE_TRUNC('month', b.due_date) = DATE_TRUNC('month', NOW())
-    LEFT JOIN payments pay ON pay.bill_id = b.id AND pay.company_id = ${c.companyId}
-    WHERE p.landlord_id = ${id} AND p.company_id = ${c.companyId} AND p.deleted_at IS NULL
+      COALESCE((
+        SELECT SUM(b.total_amount)
+        FROM properties p
+        JOIN units u ON u.property_id = p.id AND u.company_id = ${c.companyId} AND u.deleted_at IS NULL
+        JOIN leases lse ON lse.unit_id = u.id AND lse.company_id = ${c.companyId} AND lse.status = 'active'
+        JOIN monthly_bills b ON b.lease_id = lse.id
+          AND b.company_id = ${c.companyId}
+          AND DATE_TRUNC('month', b.due_date) = DATE_TRUNC('month', NOW())
+        WHERE p.landlord_id = ${id} AND p.company_id = ${c.companyId} AND p.deleted_at IS NULL
+      ), 0) AS total_billed,
+      COALESCE((
+        SELECT SUM(pay.amount)
+        FROM properties p
+        JOIN units u ON u.property_id = p.id AND u.company_id = ${c.companyId} AND u.deleted_at IS NULL
+        JOIN leases lse ON lse.unit_id = u.id AND lse.company_id = ${c.companyId} AND lse.status = 'active'
+        JOIN monthly_bills b ON b.lease_id = lse.id AND b.company_id = ${c.companyId}
+        JOIN payments pay ON pay.bill_id = b.id AND pay.company_id = ${c.companyId}
+        WHERE p.landlord_id = ${id}
+          AND p.company_id = ${c.companyId}
+          AND p.deleted_at IS NULL
+          AND DATE_TRUNC('month', pay.created_at) = DATE_TRUNC('month', NOW())
+          AND pay.undone_at IS NULL
+      ), 0) AS total_collected
   `);
 
   res.json({ success: true, data: { landlord, properties, units, monthStats } } satisfies ApiResponse<unknown>);
@@ -364,11 +376,22 @@ landlordsRouter.get('/:id/portfolio', async (req: Request, res: Response) => {
       p.id, p.name, p.address,
       COUNT(DISTINCT u.id)                                        AS unit_count,
       COUNT(DISTINCT u.id) FILTER (WHERE lse.status = 'active')  AS occupied_units,
-      COALESCE(SUM(b.amount)  FILTER (
-        WHERE DATE_TRUNC('month', b.due_date) = DATE_TRUNC('month', NOW())
+      COALESCE((
+        SELECT SUM(b.total_amount)
+        FROM units bu
+        JOIN leases bl ON bl.unit_id = bu.id AND bl.company_id = ${c.companyId} AND bl.status = 'active'
+        JOIN monthly_bills b ON b.lease_id = bl.id AND b.company_id = ${c.companyId}
+        WHERE bu.property_id = p.id AND bu.company_id = ${c.companyId} AND bu.deleted_at IS NULL
+          AND DATE_TRUNC('month', b.due_date) = DATE_TRUNC('month', NOW())
       ), 0)                                                       AS billed_this_month,
-      COALESCE(SUM(pay.amount) FILTER (
-        WHERE pay.undone_at IS NULL
+      COALESCE((
+        SELECT SUM(pay.amount)
+        FROM units cu
+        JOIN leases cl ON cl.unit_id = cu.id AND cl.company_id = ${c.companyId} AND cl.status = 'active'
+        JOIN monthly_bills cb ON cb.lease_id = cl.id AND cb.company_id = ${c.companyId}
+        JOIN payments pay ON pay.bill_id = cb.id AND pay.company_id = ${c.companyId}
+        WHERE cu.property_id = p.id AND cu.company_id = ${c.companyId} AND cu.deleted_at IS NULL
+          AND pay.undone_at IS NULL
           AND DATE_TRUNC('month', pay.created_at) = DATE_TRUNC('month', NOW())
       ), 0)                                                       AS collected_this_month,
       co.commission_type  AS override_type,
@@ -376,8 +399,6 @@ landlordsRouter.get('/:id/portfolio', async (req: Request, res: Response) => {
     FROM properties p
     LEFT JOIN units u         ON u.property_id = p.id AND u.deleted_at IS NULL
     LEFT JOIN leases lse      ON lse.unit_id = u.id AND lse.status = 'active'
-    LEFT JOIN monthly_bills b ON b.lease_id = lse.id
-    LEFT JOIN payments pay    ON pay.bill_id = b.id AND pay.company_id = ${c.companyId}
     LEFT JOIN commission_overrides co
               ON co.property_id = p.id AND co.landlord_id = ${id}
     WHERE p.landlord_id = ${id} AND p.company_id = ${c.companyId} AND p.deleted_at IS NULL

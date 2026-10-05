@@ -100,7 +100,7 @@ export default function LandlordDetailPage() {
   const [tab, setTab]                 = useState<Tab>('properties');
   const [overrideProperty, setOverrideProperty] = useState<any>(null);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['landlord', id],
     queryFn: () => apiClient.get(`/landlords/${id}`).then((r: any) => r.data.data),
     enabled: !!id,
@@ -120,6 +120,26 @@ export default function LandlordDetailPage() {
   if (isLoading) return (
     <div className="flex justify-center items-center h-64">
       <div className="w-7 h-7 border-2 border-teal-500 border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+
+  if (error) return (
+    <div className="p-8 max-w-xl mx-auto text-center">
+      <div className={`${C} p-6`}>
+        <p className="font-semibold text-red-700">Could not load landlord details</p>
+        <p className="text-sm text-gray-500 mt-2">{getApiErrorMessage(error)}</p>
+        <div className="flex justify-center gap-3 mt-5">
+          <button onClick={() => navigate('/landlords')}
+            className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-600">
+            Back to Landlord Clients
+          </button>
+          <button onClick={() => refetch()}
+            className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
+            style={{ background: '#0d9f9f' }}>
+            Try again
+          </button>
+        </div>
+      </div>
     </div>
   );
 
