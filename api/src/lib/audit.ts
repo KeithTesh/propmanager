@@ -51,7 +51,7 @@ export async function writeAudit(entry: AuditEntry): Promise<void> {
 
 // Convenience: fired after any payment recorded
 export async function auditPayment(opts: {
-  companyId: string; paymentId: string; leaseId: string; billId: string;
+  companyId: string; paymentId: string; leaseId: string; billId: string | null;
   amount: number; channel: string; actorId?: string | null; actorRole?: string | null;
   ipAddress?: string | null; userAgent?: string | null;
 }) {

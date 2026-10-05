@@ -114,21 +114,77 @@ landlordPortalRouter.get('/collections', async (req: Request, res: Response) => 
       p.name        AS property_name,
       COUNT(DISTINCT u.id)                                           AS unit_count,
       COUNT(DISTINCT u.id) FILTER (WHERE lse.status = 'active')     AS occupied_units,
-      COALESCE(SUM(b.amount), 0)                                     AS total_billed,
-      COALESCE(SUM(pay.amount) FILTER (WHERE pay.status='confirmed'),0) AS total_collected,
-      COALESCE(SUM(b.amount) - SUM(pay.amount) FILTER (WHERE pay.status='confirmed'), 0)
-                                                                     AS outstanding,
+      COALESCE((
+        SELECT SUM(b.total_amount)
+        FROM monthly_bills b
+        JOIN leases bl ON bl.id = b.lease_id AND bl.company_id = ${landlord.company_id}
+        JOIN units bu ON bu.id = bl.unit_id AND bu.company_id = ${landlord.company_id}
+        WHERE bu.property_id = p.id
+          AND bu.deleted_at IS NULL
+          AND b.company_id = ${landlord.company_id}
+          AND DATE_TRUNC('month', b.due_date) = DATE_TRUNC('month', ${month}::date)
+          AND b.status NOT IN ('draft', 'waived', 'void')
+      ), 0) AS total_billed,
+      COALESCE((
+        SELECT SUM(pay.amount)
+        FROM payments pay
+        JOIN leases cl ON cl.id = pay.lease_id AND cl.company_id = ${landlord.company_id}
+        JOIN units cu ON cu.id = cl.unit_id AND cu.company_id = ${landlord.company_id}
+        WHERE cu.property_id = p.id
+          AND cu.deleted_at IS NULL
+          AND pay.company_id = ${landlord.company_id}
+          AND DATE_TRUNC('month', COALESCE(pay.recorded_at, pay.created_at)) = DATE_TRUNC('month', ${month}::date)
+          AND pay.undone_at IS NULL
+      ), 0) AS total_collected,
+      COALESCE((
+        SELECT SUM(GREATEST(b.total_due, 0))
+        FROM monthly_bills b
+        JOIN leases bl ON bl.id = b.lease_id AND bl.company_id = ${landlord.company_id}
+        JOIN units bu ON bu.id = bl.unit_id AND bu.company_id = ${landlord.company_id}
+        WHERE bu.property_id = p.id
+          AND bu.deleted_at IS NULL
+          AND b.company_id = ${landlord.company_id}
+          AND b.status IN ('open', 'partial', 'overdue', 'payment_received_pending_verification')
+      ), 0) + COALESCE((
+        SELECT SUM(GREATEST(
+          COALESCE(dl.deposit_amount, 0) -
+          COALESCE(dl.deposit_paid_amount, 0) -
+          COALESCE(dl.deposit_waived_amount, 0),
+          0
+        ))
+        FROM leases dl
+        JOIN units du ON du.id = dl.unit_id AND du.company_id = ${landlord.company_id}
+        WHERE du.property_id = p.id
+          AND du.deleted_at IS NULL
+          AND dl.company_id = ${landlord.company_id}
+          AND dl.status <> 'draft'
+      ), 0) AS outstanding,
       ROUND(
-        COALESCE(SUM(pay.amount) FILTER (WHERE pay.status='confirmed'), 0) /
-        NULLIF(SUM(b.amount), 0) * 100, 1
-      )                                                              AS collection_rate
+        COALESCE((
+          SELECT SUM(pay.amount)
+          FROM payments pay
+          JOIN leases cl ON cl.id = pay.lease_id AND cl.company_id = ${landlord.company_id}
+          JOIN units cu ON cu.id = cl.unit_id AND cu.company_id = ${landlord.company_id}
+          WHERE cu.property_id = p.id
+            AND cu.deleted_at IS NULL
+            AND pay.company_id = ${landlord.company_id}
+            AND DATE_TRUNC('month', COALESCE(pay.recorded_at, pay.created_at)) = DATE_TRUNC('month', ${month}::date)
+            AND pay.undone_at IS NULL
+        ), 0) / NULLIF((
+          SELECT SUM(b.total_amount)
+          FROM monthly_bills b
+          JOIN leases bl ON bl.id = b.lease_id AND bl.company_id = ${landlord.company_id}
+          JOIN units bu ON bu.id = bl.unit_id AND bu.company_id = ${landlord.company_id}
+          WHERE bu.property_id = p.id
+            AND bu.deleted_at IS NULL
+            AND b.company_id = ${landlord.company_id}
+            AND DATE_TRUNC('month', b.due_date) = DATE_TRUNC('month', ${month}::date)
+            AND b.status NOT IN ('draft', 'waived', 'void')
+        ), 0) * 100, 1
+      ) AS collection_rate
     FROM properties p
     LEFT JOIN units u    ON u.property_id = p.id AND u.deleted_at IS NULL
     LEFT JOIN leases lse ON lse.unit_id = u.id AND lse.status = 'active'
-    LEFT JOIN monthly_bills b ON b.lease_id = lse.id
-      AND DATE_TRUNC('month', b.due_date) = ${month}::date
-    LEFT JOIN payments pay ON pay.bill_id = b.id
-      AND pay.company_id = ${landlord.company_id}
     WHERE p.landlord_id = ${landlord.id}
       AND p.company_id  = ${landlord.company_id}
       AND p.deleted_at IS NULL
@@ -314,18 +370,59 @@ landlordPortalRouter.get('/overview', async (req: Request, res: Response) => {
   // This month collections
   const [monthCollections] = await sql`
     SELECT
-      COALESCE(SUM(b.amount), 0)                                       AS total_billed,
-      COALESCE(SUM(pay.amount) FILTER (WHERE pay.status='confirmed'),0) AS total_collected
-    FROM properties p
-    JOIN units u    ON u.property_id = p.id AND u.deleted_at IS NULL
-    JOIN leases lse ON lse.unit_id = u.id AND lse.status = 'active'
-    JOIN monthly_bills b ON b.lease_id = lse.id
-      AND DATE_TRUNC('month', b.due_date) = DATE_TRUNC('month', NOW())
-    LEFT JOIN payments pay ON pay.bill_id = b.id
-      AND pay.company_id = ${landlord.company_id}
-    WHERE p.landlord_id = ${landlord.id}
-      AND p.company_id  = ${landlord.company_id}
-      AND p.deleted_at IS NULL
+      COALESCE((
+        SELECT SUM(b.total_amount)
+        FROM monthly_bills b
+        JOIN leases bl ON bl.id = b.lease_id AND bl.company_id = ${landlord.company_id}
+        JOIN units bu ON bu.id = bl.unit_id AND bu.company_id = ${landlord.company_id}
+        JOIN properties bp ON bp.id = bu.property_id AND bp.company_id = ${landlord.company_id}
+        WHERE bp.landlord_id = ${landlord.id}
+          AND bp.deleted_at IS NULL
+          AND bu.deleted_at IS NULL
+          AND b.company_id = ${landlord.company_id}
+          AND DATE_TRUNC('month', b.due_date) = DATE_TRUNC('month', NOW())
+          AND b.status NOT IN ('draft', 'waived', 'void')
+      ), 0) AS total_billed,
+      COALESCE((
+        SELECT SUM(pay.amount)
+        FROM payments pay
+        JOIN leases cl ON cl.id = pay.lease_id AND cl.company_id = ${landlord.company_id}
+        JOIN units cu ON cu.id = cl.unit_id AND cu.company_id = ${landlord.company_id}
+        JOIN properties cp ON cp.id = cu.property_id AND cp.company_id = ${landlord.company_id}
+        WHERE cp.landlord_id = ${landlord.id}
+          AND cp.deleted_at IS NULL
+          AND cu.deleted_at IS NULL
+          AND pay.company_id = ${landlord.company_id}
+          AND DATE_TRUNC('month', COALESCE(pay.recorded_at, pay.created_at)) = DATE_TRUNC('month', NOW())
+          AND pay.undone_at IS NULL
+      ), 0) AS total_collected,
+      COALESCE((
+        SELECT SUM(GREATEST(b.total_due, 0))
+        FROM monthly_bills b
+        JOIN leases bl ON bl.id = b.lease_id AND bl.company_id = ${landlord.company_id}
+        JOIN units bu ON bu.id = bl.unit_id AND bu.company_id = ${landlord.company_id}
+        JOIN properties bp ON bp.id = bu.property_id AND bp.company_id = ${landlord.company_id}
+        WHERE bp.landlord_id = ${landlord.id}
+          AND bp.deleted_at IS NULL
+          AND bu.deleted_at IS NULL
+          AND b.company_id = ${landlord.company_id}
+          AND b.status IN ('open', 'partial', 'overdue', 'payment_received_pending_verification')
+      ), 0) + COALESCE((
+        SELECT SUM(GREATEST(
+          COALESCE(dl.deposit_amount, 0) -
+          COALESCE(dl.deposit_paid_amount, 0) -
+          COALESCE(dl.deposit_waived_amount, 0),
+          0
+        ))
+        FROM leases dl
+        JOIN units du ON du.id = dl.unit_id AND du.company_id = ${landlord.company_id}
+        JOIN properties dp ON dp.id = du.property_id AND dp.company_id = ${landlord.company_id}
+        WHERE dp.landlord_id = ${landlord.id}
+          AND dp.deleted_at IS NULL
+          AND du.deleted_at IS NULL
+          AND dl.company_id = ${landlord.company_id}
+          AND dl.status <> 'draft'
+      ), 0) AS total_outstanding
   `;
 
   // Last remittance statement

@@ -7,6 +7,7 @@ import { withRLS, withRLSTransaction } from '../../db';
 import { authenticate } from '../../middleware/auth';
 import { ForbiddenError, NotFoundError, ValidationError } from '../../lib/errors';
 import { logger } from '../../lib/logger';
+import { auditPayment } from '../../lib/audit';
 import { calculateProration } from '../../lib/prorationEngine';
 import type { ApiResponse, RLSContext } from '../../types';
 
@@ -34,11 +35,17 @@ leasesRouter.get('/', async (req: Request, res: Response) => {
 
         -- Outstanding balance
         COALESCE((
-          SELECT SUM(mb.total_due)
+          SELECT SUM(GREATEST(mb.total_due, 0))
           FROM monthly_bills mb
           WHERE mb.lease_id = l.id
-            AND mb.status IN ('open','partial','overdue')
-        ), 0) AS outstanding_balance,
+            AND mb.company_id = l.company_id
+            AND mb.status IN ('open','partial','overdue','payment_received_pending_verification')
+        ), 0) + GREATEST(
+          COALESCE(l.deposit_amount, 0) -
+          COALESCE(l.deposit_paid_amount, 0) -
+          COALESCE(l.deposit_waived_amount, 0),
+          0
+        ) AS outstanding_balance,
 
         -- Days until end (for fixed leases)
         CASE WHEN l.end_date IS NOT NULL
@@ -453,7 +460,7 @@ leasesRouter.patch('/:id/deposit', async (req: Request, res: Response) => {
     const [currentLease] = await tx`
       SELECT deposit_amount, deposit_paid_amount, deposit_waived_amount
       FROM leases
-      WHERE id = ${id} AND company_id = ${req.ctx.companyId} AND status IN ('active','notice')
+      WHERE id = ${id} AND company_id = ${req.ctx.companyId} AND status <> 'draft'
       FOR UPDATE
     `;
     if (!currentLease) return null;
@@ -473,53 +480,36 @@ leasesRouter.patch('/:id/deposit', async (req: Request, res: Response) => {
         deposit_paid_amount = deposit_paid_amount + ${amountPaid},
         deposit_paid_at     = COALESCE(deposit_paid_at, ${paidDate}),
         updated_at          = NOW()
-      WHERE id = ${id} AND company_id = ${req.ctx.companyId} AND status IN ('active','notice')
-      RETURNING id, lease_id, unit_id, company_id, deposit_amount, deposit_paid_amount, deposit_paid_at, snap_account_reference
+      WHERE id = ${id} AND company_id = ${req.ctx.companyId} AND status <> 'draft'
+      RETURNING id, company_id, deposit_amount, deposit_paid_amount, deposit_paid_at
     `;
     if (!lease) return null;
 
-    // 2. Find the deposit bill for this lease (if any)
-    const [depositBill] = await tx`
-      SELECT id, total_amount, total_paid
-      FROM monthly_bills
-      WHERE lease_id = ${id}
-        AND company_id = ${req.ctx.companyId}
-        AND bill_type = 'deposit'
-        AND status NOT IN ('paid', 'waived', 'void')
-      ORDER BY for_month ASC
-      LIMIT 1
+    const paymentId = randomUUID();
+    const receiptRef = `DEP-${Date.now()}`;
+    await tx`
+      INSERT INTO payments (
+        id, company_id, bill_id, lease_id, amount, deposit_amount, channel,
+        bank_transaction_ref, receipt_number, recorded_at, recorded_by,
+        undo_expires_at, notes
+      ) VALUES (
+        ${paymentId}, ${req.ctx.companyId}, NULL, ${id}, ${amountPaid}, ${amountPaid},
+        'bank_transfer', ${receiptRef}, ${receiptRef}, ${paidDate}, ${req.ctx.userId},
+        NOW() + INTERVAL '15 minutes', 'Deposit payment'
+      )
     `;
-
-    if (depositBill) {
-      // 3. Insert payment record linked to the deposit bill
-      const receiptRef = `DEP-${Date.now()}`;
-      await tx`
-        INSERT INTO payments (
-          id, company_id, bill_id, lease_id,
-          amount, channel,
-          bank_transaction_ref,
-          recorded_at, recorded_by, notes
-        ) VALUES (
-          ${randomUUID()}, ${req.ctx.companyId}, ${depositBill.id}, ${id},
-          ${amountPaid}, 'bank_transfer',
-          ${receiptRef},
-          ${paidDate}, ${req.ctx.userId}, 'Deposit payment'
-        )
-      `;
-
-      // 4. Update deposit bill total_paid and status
-      const newTotalPaid = parseFloat(depositBill.total_paid ?? '0') + amountPaid;
-      const billTotal    = parseFloat(depositBill.total_amount);
-      const newStatus    = newTotalPaid >= billTotal - 0.01 ? 'paid' : 'partial';
-
-      await tx`
-        UPDATE monthly_bills SET
-          total_paid = ${newTotalPaid},
-          status     = ${newStatus},
-          updated_at = NOW()
-        WHERE id = ${depositBill.id}
-      `;
-    }
+    await auditPayment({
+      companyId: req.ctx.companyId!,
+      paymentId,
+      leaseId: id,
+      billId: null,
+      amount: amountPaid,
+      channel: 'bank_transfer',
+      actorId: req.ctx.userId,
+      actorRole: req.ctx.userRole,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
 
     return lease;
   });

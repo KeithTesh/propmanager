@@ -31,6 +31,7 @@ interface Unmatched {
 
 interface Lease {
   id: string; snap_account_reference: string | null;
+  status: 'active' | 'notice' | 'terminated' | 'expired';
   tenant_name: string; tenant_phone: string | null;
   unit_number: string; property_name: string;
 }
@@ -500,7 +501,7 @@ export default function ReconciliationPage() {
                         placeholder="Search tenant, phone, account reference, unit, or property…"
                         className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 mb-2" />
                       {searchLeases.trim().length < 2 && (
-                        <p className="text-xs text-gray-500">Enter at least 2 characters to search active leases.</p>
+                        <p className="text-xs text-gray-500">                        Enter at least 2 characters to search leases with an outstanding deposit or bill.</p>
                       )}
                       {assignmentLeaseSearch.isFetching && (
                         <p className="text-xs text-gray-500">Searching leases…</p>
@@ -512,7 +513,7 @@ export default function ReconciliationPage() {
                         </div>
                       )}
                       {assignmentLeaseSearch.data?.length === 0 && !assignmentLeaseSearch.isFetching && searchLeases.trim().length >= 2 && (
-                        <p className="text-xs text-gray-500">No active leases found for that search.</p>
+                        <p className="text-xs text-gray-500">No leases with outstanding balances found for that search.</p>
                       )}
                       {!!assignmentLeaseSearch.data?.length && (
                         <div className="space-y-1">
@@ -521,6 +522,7 @@ export default function ReconciliationPage() {
                               className="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-white border border-transparent hover:border-gray-200 transition">
                               <span className="font-medium text-gray-900">{l.tenant_name}</span>
                               <span className="text-gray-400 ml-2">Unit {l.unit_number} · {l.property_name}</span>
+                              <span className="ml-2 text-[10px] uppercase tracking-wide text-gray-500">{l.status}</span>
                               {l.tenant_phone && <span className="block text-xs text-gray-500">{l.tenant_phone}</span>}
                             </button>
                           ))}

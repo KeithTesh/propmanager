@@ -35,15 +35,16 @@ reportsRouter.get('/income-statement', async (req: Request, res: Response) => {
   const [revenue] = await withRLS(c, async (db) => db`
     SELECT
       COALESCE(SUM(p.amount), 0)                                              AS total_revenue,
-      COALESCE(SUM(p.amount) FILTER (WHERE mb.bill_type = 'rent'),       0)  AS rent_revenue,
-      COALESCE(SUM(p.amount) FILTER (WHERE mb.bill_type = 'penalty'),    0)  AS penalty_revenue,
-      COALESCE(SUM(p.amount) FILTER (WHERE mb.bill_type = 'signing'),    0)  AS signing_revenue,
-      COALESCE(SUM(p.amount) FILTER (WHERE mb.bill_type = 'adjustment'), 0)  AS adjustment_revenue
+      COALESCE(SUM(p.amount - COALESCE(p.deposit_amount, 0)) FILTER (WHERE mb.bill_type = 'rent'),       0) AS rent_revenue,
+      COALESCE(SUM(p.amount - COALESCE(p.deposit_amount, 0)) FILTER (WHERE mb.bill_type = 'penalty'),    0) AS penalty_revenue,
+      COALESCE(SUM(p.amount - COALESCE(p.deposit_amount, 0)) FILTER (WHERE mb.bill_type = 'signing'),    0) AS signing_revenue,
+      COALESCE(SUM(p.amount - COALESCE(p.deposit_amount, 0)) FILTER (WHERE mb.bill_type = 'adjustment'), 0) AS adjustment_revenue,
+      COALESCE(SUM(p.deposit_amount), 0) AS deposit_revenue
     FROM payments p
-    JOIN monthly_bills mb ON mb.id = p.bill_id AND mb.company_id = ${ctx(req).companyId}
+    LEFT JOIN monthly_bills mb ON mb.id = p.bill_id AND mb.company_id = ${ctx(req).companyId}
     WHERE p.company_id = ${ctx(req).companyId} AND p.company_id = ${c.companyId}
       AND p.undone_at IS NULL
-      AND (p.recorded_at AT TIME ZONE 'Africa/Nairobi')::DATE BETWEEN ${fromDate}::DATE AND ${toDate}::DATE
+      AND (COALESCE(p.recorded_at, p.created_at) AT TIME ZONE 'Africa/Nairobi')::DATE BETWEEN ${fromDate}::DATE AND ${toDate}::DATE
   `);
 
   const expenses = await withRLS(c, async (db) => db`
@@ -68,12 +69,12 @@ reportsRouter.get('/income-statement', async (req: Request, res: Response) => {
   const monthly = await withRLS(c, async (db) => db`
     WITH rev AS (
       SELECT
-        DATE_TRUNC('month', recorded_at AT TIME ZONE 'Africa/Nairobi') AS month_date,
+        DATE_TRUNC('month', COALESCE(recorded_at, created_at) AT TIME ZONE 'Africa/Nairobi') AS month_date,
         SUM(amount)                                                      AS revenue
       FROM payments
       WHERE company_id = ${c.companyId}
         AND undone_at IS NULL
-        AND (recorded_at AT TIME ZONE 'Africa/Nairobi')::DATE BETWEEN ${fromDate}::DATE AND ${toDate}::DATE
+        AND (COALESCE(recorded_at, created_at) AT TIME ZONE 'Africa/Nairobi')::DATE BETWEEN ${fromDate}::DATE AND ${toDate}::DATE
       GROUP BY 1
     ),
     exp AS (
@@ -141,14 +142,27 @@ reportsRouter.get('/rent-roll', async (req: Request, res: Response) => {
       l.end_date,
       l.monthly_rent             AS rent_amount,
       l.deposit_amount,
-      CASE WHEN l.deposit_paid_at IS NOT NULL THEN TRUE ELSE FALSE END AS deposit_paid,
+      COALESCE(l.deposit_paid_amount, 0) + COALESCE(l.deposit_waived_amount, 0)
+        >= COALESCE(l.deposit_amount, 0) AS deposit_paid,
+      GREATEST(
+        COALESCE(l.deposit_amount, 0) -
+        COALESCE(l.deposit_paid_amount, 0) -
+        COALESCE(l.deposit_waived_amount, 0),
+        0
+      ) AS deposit_outstanding,
       COALESCE((
-        SELECT SUM(mb2.total_due)
+        SELECT SUM(GREATEST(mb2.total_due, 0))
         FROM monthly_bills mb2
         WHERE mb2.lease_id = l.id
-          AND mb2.status IN ('open','partial','overdue')
+          AND mb2.company_id = l.company_id
+          AND mb2.status IN ('open','partial','overdue','payment_received_pending_verification')
           AND mb2.for_month <= DATE_TRUNC('month', CURRENT_DATE)
-      ), 0) AS outstanding_balance
+      ), 0) + GREATEST(
+        COALESCE(l.deposit_amount, 0) -
+        COALESCE(l.deposit_paid_amount, 0) -
+        COALESCE(l.deposit_waived_amount, 0),
+        0
+      ) AS outstanding_balance
     FROM units u
     JOIN properties p ON p.id = u.property_id
     LEFT JOIN leases l ON l.unit_id = u.id AND l.status IN ('active','notice')
@@ -267,10 +281,22 @@ reportsRouter.get('/collection', async (req: Request, res: Response) => {
     SELECT
       COUNT(*)                                               AS total_bills,
       COUNT(*) FILTER (WHERE mb.status = 'paid')             AS paid_count,
-      COUNT(*) FILTER (WHERE mb.status IN ('open','partial','overdue')) AS unpaid_count,
+      COUNT(*) FILTER (WHERE mb.status IN ('open','partial','overdue','payment_received_pending_verification')) AS unpaid_count,
       COALESCE(SUM(mb.total_amount), 0)                      AS total_billed,
       COALESCE(SUM(mb.total_paid),   0)                      AS total_collected,
-      COALESCE(SUM(mb.total_due),    0)                      AS total_outstanding
+      COALESCE(SUM(GREATEST(mb.total_due, 0)) FILTER (
+        WHERE mb.status IN ('open', 'partial', 'overdue', 'payment_received_pending_verification')
+      ), 0) + COALESCE((
+        SELECT SUM(GREATEST(
+          COALESCE(l.deposit_amount, 0) -
+          COALESCE(l.deposit_paid_amount, 0) -
+          COALESCE(l.deposit_waived_amount, 0),
+          0
+        ))
+        FROM leases l
+        WHERE l.company_id = ${c.companyId}
+          AND l.status <> 'draft'
+      ), 0) AS total_outstanding
     FROM monthly_bills mb
     WHERE mb.company_id = ${ctx(req).companyId} AND mb.company_id = ${c.companyId}
       AND TO_CHAR(mb.for_month, 'YYYY-MM') = ${forMonth.slice(0, 7)}

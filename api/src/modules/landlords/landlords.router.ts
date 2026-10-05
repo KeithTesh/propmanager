@@ -85,8 +85,15 @@ landlordsRouter.get('/', async (req: Request, res: Response) => {
       )                                                        AS occupied_units,
 
       -- This month collections
-      COALESCE(SUM(pay.amount) FILTER (
-        WHERE pay.created_at >= DATE_TRUNC('month', NOW())
+      COALESCE((
+        SELECT SUM(pay.amount)
+        FROM payments pay
+        JOIN leases pl ON pl.id = pay.lease_id AND pl.company_id = ${c.companyId}
+        JOIN units pu ON pu.id = pl.unit_id AND pu.company_id = ${c.companyId}
+        JOIN properties pp ON pp.id = pu.property_id AND pp.company_id = ${c.companyId}
+        WHERE pp.landlord_id = l.id
+          AND pay.company_id = ${c.companyId}
+          AND COALESCE(pay.recorded_at, pay.created_at) >= DATE_TRUNC('month', NOW())
           AND pay.undone_at IS NULL
       ), 0)                                                    AS collected_this_month
 
@@ -94,9 +101,6 @@ landlordsRouter.get('/', async (req: Request, res: Response) => {
     LEFT JOIN properties p    ON p.landlord_id = l.id AND p.deleted_at IS NULL
     LEFT JOIN units u         ON u.property_id = p.id AND u.deleted_at IS NULL
     LEFT JOIN leases lse      ON lse.unit_id = u.id AND lse.status = 'active'
-    LEFT JOIN monthly_bills b ON b.lease_id = lse.id
-    LEFT JOIN payments pay    ON pay.company_id = ${c.companyId} AND pay.bill_id = b.id
-
     WHERE l.company_id = ${c.companyId} AND l.deleted_at IS NULL
     GROUP BY l.id
     ORDER BY l.full_name ASC
@@ -180,13 +184,12 @@ landlordsRouter.get('/:id', async (req: Request, res: Response) => {
         SELECT SUM(pay.amount)
         FROM properties p
         JOIN units u ON u.property_id = p.id AND u.company_id = ${c.companyId} AND u.deleted_at IS NULL
-        JOIN leases lse ON lse.unit_id = u.id AND lse.company_id = ${c.companyId} AND lse.status = 'active'
-        JOIN monthly_bills b ON b.lease_id = lse.id AND b.company_id = ${c.companyId}
-        JOIN payments pay ON pay.bill_id = b.id AND pay.company_id = ${c.companyId}
+        JOIN leases lse ON lse.unit_id = u.id AND lse.company_id = ${c.companyId}
+        JOIN payments pay ON pay.lease_id = lse.id AND pay.company_id = ${c.companyId}
         WHERE p.landlord_id = ${id}
           AND p.company_id = ${c.companyId}
           AND p.deleted_at IS NULL
-          AND DATE_TRUNC('month', pay.created_at) = DATE_TRUNC('month', NOW())
+          AND DATE_TRUNC('month', COALESCE(pay.recorded_at, pay.created_at)) = DATE_TRUNC('month', NOW())
           AND pay.undone_at IS NULL
       ), 0) AS total_collected
   `);
@@ -387,12 +390,11 @@ landlordsRouter.get('/:id/portfolio', async (req: Request, res: Response) => {
       COALESCE((
         SELECT SUM(pay.amount)
         FROM units cu
-        JOIN leases cl ON cl.unit_id = cu.id AND cl.company_id = ${c.companyId} AND cl.status = 'active'
-        JOIN monthly_bills cb ON cb.lease_id = cl.id AND cb.company_id = ${c.companyId}
-        JOIN payments pay ON pay.bill_id = cb.id AND pay.company_id = ${c.companyId}
+        JOIN leases cl ON cl.unit_id = cu.id AND cl.company_id = ${c.companyId}
+        JOIN payments pay ON pay.lease_id = cl.id AND pay.company_id = ${c.companyId}
         WHERE cu.property_id = p.id AND cu.company_id = ${c.companyId} AND cu.deleted_at IS NULL
           AND pay.undone_at IS NULL
-          AND DATE_TRUNC('month', pay.created_at) = DATE_TRUNC('month', NOW())
+          AND DATE_TRUNC('month', COALESCE(pay.recorded_at, pay.created_at)) = DATE_TRUNC('month', NOW())
       ), 0)                                                       AS collected_this_month,
       co.commission_type  AS override_type,
       co.commission_value AS override_value

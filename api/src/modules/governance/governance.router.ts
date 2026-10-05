@@ -417,16 +417,26 @@ governanceRouter.post('/periods/:id/close', requireRole('owner', 'finance'), asy
             AND pr.payroll_month >= ${monthStart} AND pr.payroll_month < ${monthEnd}
         ), 0) AS total_payroll,
         COALESCE((
-          SELECT SUM(mb.total_due) FROM monthly_bills mb
+          SELECT SUM(GREATEST(mb.total_due, 0)) FROM monthly_bills mb
           WHERE mb.company_id = ${companyId}
-            AND mb.status IN ('open','partial','overdue')
+            AND mb.status IN ('open','partial','overdue','payment_received_pending_verification')
             AND mb.for_month < ${monthEnd}
+        ), 0) + COALESCE((
+          SELECT SUM(GREATEST(
+            COALESCE(l.deposit_amount, 0) -
+            COALESCE(l.deposit_paid_amount, 0) -
+            COALESCE(l.deposit_waived_amount, 0),
+            0
+          ))
+          FROM leases l
+          WHERE l.company_id = ${companyId} AND l.status <> 'draft'
         ), 0) AS total_arrears,
         COALESCE((
           SELECT SUM(p2.amount) FROM payments p2
           WHERE p2.company_id = ${companyId}
             AND p2.undone_at IS NULL
-            AND p2.recorded_at >= ${monthStart} AND p2.recorded_at < ${monthEnd}
+            AND COALESCE(p2.recorded_at, p2.created_at) >= ${monthStart}
+            AND COALESCE(p2.recorded_at, p2.created_at) < ${monthEnd}
         ), 0) AS total_payments,
         (SELECT COUNT(*) FROM leases l WHERE l.company_id = ${companyId} AND l.status = 'active') AS active_leases,
         (SELECT COUNT(*) FROM units u WHERE u.company_id = ${companyId} AND u.is_occupied = true)::numeric /
@@ -484,8 +494,9 @@ governanceRouter.post('/periods/:id/force-close', requireRole('owner'), async (r
         COALESCE((SELECT SUM(p.amount) FROM payments p JOIN monthly_bills mb ON mb.id = p.bill_id WHERE p.company_id = ${companyId} AND p.undone_at IS NULL AND mb.for_month >= ${monthStart} AND mb.for_month < ${monthEnd}), 0) AS total_revenue,
         COALESCE((SELECT SUM(e.amount) FROM expenses e WHERE e.company_id = ${companyId} AND (e.approval_status = 'approved' OR e.approval_status IS NULL) AND e.expense_date >= ${monthStart} AND e.expense_date < ${monthEnd}), 0) AS total_expenses,
         COALESCE((SELECT SUM(pi.net_pay) FROM payroll_items pi JOIN payroll_runs pr ON pr.id = pi.payroll_run_id WHERE pr.company_id = ${companyId} AND pr.status = 'paid' AND pr.payroll_month >= ${monthStart} AND pr.payroll_month < ${monthEnd}), 0) AS total_payroll,
-        COALESCE((SELECT SUM(mb.total_due) FROM monthly_bills mb WHERE mb.company_id = ${companyId} AND mb.status IN ('open','partial','overdue') AND mb.for_month < ${monthEnd}), 0) AS total_arrears,
-        COALESCE((SELECT SUM(p2.amount) FROM payments p2 WHERE p2.company_id = ${companyId} AND p2.undone_at IS NULL AND p2.recorded_at >= ${monthStart} AND p2.recorded_at < ${monthEnd}), 0) AS total_payments,
+        COALESCE((SELECT SUM(GREATEST(mb.total_due, 0)) FROM monthly_bills mb WHERE mb.company_id = ${companyId} AND mb.status IN ('open','partial','overdue','payment_received_pending_verification') AND mb.for_month < ${monthEnd}), 0) +
+        COALESCE((SELECT SUM(GREATEST(COALESCE(l.deposit_amount, 0) - COALESCE(l.deposit_paid_amount, 0) - COALESCE(l.deposit_waived_amount, 0), 0)) FROM leases l WHERE l.company_id = ${companyId} AND l.status <> 'draft'), 0) AS total_arrears,
+        COALESCE((SELECT SUM(p2.amount) FROM payments p2 WHERE p2.company_id = ${companyId} AND p2.undone_at IS NULL AND COALESCE(p2.recorded_at, p2.created_at) >= ${monthStart} AND COALESCE(p2.recorded_at, p2.created_at) < ${monthEnd}), 0) AS total_payments,
         (SELECT COUNT(*) FROM leases l WHERE l.company_id = ${companyId} AND l.status = 'active') AS active_leases,
         (SELECT COUNT(*) FROM units u WHERE u.company_id = ${companyId} AND u.is_occupied = true)::numeric / NULLIF((SELECT COUNT(*) FROM units u2 WHERE u2.company_id = ${companyId}), 0) * 100 AS occupancy_rate
     `);

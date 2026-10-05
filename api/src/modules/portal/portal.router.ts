@@ -244,12 +244,12 @@ portalRouter.get('/payments', async (req: Request, res: Response) => {
       py.mpesa_receipt_number,
       py.recorded_at,
       py.notes,
-      mb.for_month,
-      mb.bill_type,
+      COALESCE(mb.for_month, py.bank_transaction_date, py.recorded_at::date, py.created_at::date) AS for_month,
+      COALESCE(mb.bill_type, 'deposit') AS bill_type,
       mb.due_date
     FROM payments py
-    JOIN monthly_bills mb ON mb.id = py.bill_id
-    JOIN leases l         ON l.id  = mb.lease_id
+    LEFT JOIN monthly_bills mb ON mb.id = py.bill_id
+    JOIN leases l         ON l.id  = py.lease_id
     WHERE py.company_id = ${c.companyId}
       AND py.undone_at IS NULL
       AND l.primary_tenant_id = (
@@ -262,8 +262,7 @@ portalRouter.get('/payments', async (req: Request, res: Response) => {
 
   const [{ count }] = await withRLS(c, async (db) => db`
     SELECT COUNT(*) FROM payments py
-    JOIN monthly_bills mb ON mb.id = py.bill_id
-    JOIN leases l         ON l.id  = mb.lease_id
+    JOIN leases l         ON l.id  = py.lease_id
     WHERE py.company_id = ${c.companyId}
       AND py.undone_at IS NULL
       AND l.primary_tenant_id = (

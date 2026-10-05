@@ -51,17 +51,29 @@ dashboardRouter.get('/stats', async (req: Request, res: Response) => {
       const [row] = await db`
         SELECT
           COALESCE(SUM(p.amount) FILTER (
-            WHERE DATE_TRUNC('month', p.recorded_at) = DATE_TRUNC('month', NOW())
+            WHERE DATE_TRUNC('month', COALESCE(p.recorded_at, p.created_at)) = DATE_TRUNC('month', NOW())
               AND p.undone_at IS NULL
           ), 0) AS collected_mtd,
           COALESCE(SUM(p.amount) FILTER (
-            WHERE DATE_TRUNC('month', p.recorded_at) = DATE_TRUNC('month', NOW() - INTERVAL '1 month')
+            WHERE DATE_TRUNC('month', COALESCE(p.recorded_at, p.created_at)) = DATE_TRUNC('month', NOW() - INTERVAL '1 month')
               AND p.undone_at IS NULL
           ), 0) AS collected_last_month,
           COALESCE((
             SELECT SUM(GREATEST(mb.total_due, 0)) FROM monthly_bills mb
-            WHERE mb.company_id = ${cid} AND mb.status IN ('open','partial','overdue')
+            WHERE mb.company_id = ${cid}
+              AND mb.status IN ('open','partial','overdue','payment_received_pending_verification')
             ${pf ? db`AND mb.unit_id IN (SELECT id FROM units WHERE property_id = ANY(${pf as any}) AND company_id = ${cid})` : db``}
+          ), 0) + COALESCE((
+            SELECT SUM(GREATEST(
+              COALESCE(l.deposit_amount, 0) -
+              COALESCE(l.deposit_paid_amount, 0) -
+              COALESCE(l.deposit_waived_amount, 0),
+              0
+            ))
+            FROM leases l
+            JOIN units du ON du.id = l.unit_id AND du.company_id = ${cid}
+            WHERE l.company_id = ${cid} AND l.status <> 'draft'
+            ${pf ? db`AND du.property_id = ANY(${pf as any})` : db``}
           ), 0) AS total_outstanding,
           COALESCE((
             SELECT SUM(mb.total_amount) FROM monthly_bills mb
@@ -74,7 +86,7 @@ dashboardRouter.get('/stats', async (req: Request, res: Response) => {
         JOIN leases l ON l.id = p.lease_id AND l.company_id = ${cid}
         JOIN units u  ON u.id = l.unit_id  AND u.company_id = ${cid}
         WHERE p.company_id = ${cid}
-          AND DATE_TRUNC('month', p.recorded_at) = DATE_TRUNC('month', NOW())
+          AND DATE_TRUNC('month', COALESCE(p.recorded_at, p.created_at)) = DATE_TRUNC('month', NOW())
           ${pf ? db`AND u.property_id = ANY(${pf as any})` : db``}
       `;
       return row;
@@ -84,17 +96,17 @@ dashboardRouter.get('/stats', async (req: Request, res: Response) => {
       return db`
         WITH months AS (
           SELECT
-            DATE_TRUNC('month', p.recorded_at) AS month_trunc,
-            TO_CHAR(DATE_TRUNC('month', p.recorded_at), 'Mon')     AS month_label,
-            TO_CHAR(DATE_TRUNC('month', p.recorded_at), 'YYYY-MM') AS month_key,
+            DATE_TRUNC('month', COALESCE(p.recorded_at, p.created_at)) AS month_trunc,
+            TO_CHAR(DATE_TRUNC('month', COALESCE(p.recorded_at, p.created_at)), 'Mon')     AS month_label,
+            TO_CHAR(DATE_TRUNC('month', COALESCE(p.recorded_at, p.created_at)), 'YYYY-MM') AS month_key,
             COALESCE(SUM(p.amount) FILTER (WHERE p.undone_at IS NULL), 0) AS collected
           FROM payments p
           JOIN leases l ON l.id = p.lease_id AND l.company_id = ${cid}
           JOIN units u  ON u.id = l.unit_id  AND u.company_id = ${cid}
           WHERE p.company_id = ${cid}
-            AND p.recorded_at >= NOW() - INTERVAL '6 months'
+            AND COALESCE(p.recorded_at, p.created_at) >= NOW() - INTERVAL '6 months'
             ${pf ? db`AND u.property_id = ANY(${pf as any})` : db``}
-          GROUP BY DATE_TRUNC('month', p.recorded_at)
+          GROUP BY DATE_TRUNC('month', COALESCE(p.recorded_at, p.created_at))
         ),
         billed AS (
           SELECT

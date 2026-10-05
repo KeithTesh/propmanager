@@ -199,19 +199,31 @@ remittancesRouter.post('/generate', async (req: Request, res: Response) => {
   let totalExpenses = 0;
 
   for (const prop of properties) {
-    // Rent collected this month for this property
+    // Keep billed amounts and cash collections independent to avoid multiplying either total.
     const [collections] = await withRLS(c, async (db) => db`
       SELECT
-        COALESCE(SUM(b.amount), 0)              AS billed,
-        COALESCE(SUM(pay.amount) FILTER (
-          WHERE pay.status = 'confirmed'
-        ), 0)                                   AS collected
-      FROM units u
-      JOIN leases lse      ON lse.unit_id = u.id
-      JOIN monthly_bills b ON b.lease_id = lse.id
-        AND DATE_TRUNC('month', b.due_date) = ${periodMonth}::date
-      LEFT JOIN payments pay ON pay.bill_id = b.id AND pay.company_id = ${c.companyId}
-      WHERE u.property_id = ${prop.id} AND u.deleted_at IS NULL
+        COALESCE((
+          SELECT SUM(b.total_amount)
+          FROM monthly_bills b
+          JOIN leases lse ON lse.id = b.lease_id AND lse.company_id = ${c.companyId}
+          JOIN units u ON u.id = lse.unit_id AND u.company_id = ${c.companyId}
+          WHERE u.property_id = ${prop.id}
+            AND u.deleted_at IS NULL
+            AND b.company_id = ${c.companyId}
+            AND DATE_TRUNC('month', b.due_date) = DATE_TRUNC('month', ${periodMonth}::date)
+            AND b.status NOT IN ('draft', 'waived', 'void')
+        ), 0) AS billed,
+        COALESCE((
+          SELECT SUM(pay.amount)
+          FROM payments pay
+          JOIN leases lse ON lse.id = pay.lease_id AND lse.company_id = ${c.companyId}
+          JOIN units u ON u.id = lse.unit_id AND u.company_id = ${c.companyId}
+          WHERE u.property_id = ${prop.id}
+            AND u.deleted_at IS NULL
+            AND pay.company_id = ${c.companyId}
+            AND DATE_TRUNC('month', COALESCE(pay.recorded_at, pay.created_at)) = DATE_TRUNC('month', ${periodMonth}::date)
+            AND pay.undone_at IS NULL
+        ), 0) AS collected
     `);
 
     // Approved expenses for this property this month

@@ -12,13 +12,14 @@ interface Bill {
   unit_number: string; property_name: string;
   for_month: string; due_date: string; bill_type: string;
   rent_amount: string; total_amount: string; total_paid: string; total_due: string;
-  status: 'open' | 'partial' | 'overdue' | 'paid' | 'waived' | 'void' | 'draft';
+  deposit_due: string; deposit_only?: boolean;
+  status: 'open' | 'partial' | 'overdue' | 'payment_received_pending_verification' | 'paid' | 'waived' | 'void' | 'draft';
   is_prorated: boolean; proration_description: string | null;
   snap_account_reference: string;
 }
 
 interface Payment {
-  id: string; amount: string; channel: string;
+  id: string; amount: string; deposit_amount: string; channel: string;
   tenant_name: string; unit_number: string; property_name: string;
   for_month: string; bill_type: string;
   mpesa_receipt_number: string | null; bank_transaction_ref: string | null;
@@ -39,6 +40,7 @@ const STATUS_STYLE: Record<string, string> = {
   open:    'bg-blue-50 text-blue-600',
   partial: 'bg-amber-50 text-amber-700',
   overdue: 'bg-red-50 text-red-600',
+  payment_received_pending_verification: 'bg-purple-50 text-purple-700',
   paid:    'bg-emerald-50 text-emerald-700',
   waived:  'bg-gray-100 text-gray-500',
   void:    'bg-gray-100 text-gray-400',
@@ -65,10 +67,10 @@ function RecordPaymentModal({ bill, onClose, onSaved }: {
   });
   const depositOwed = leaseData
     ? Math.max(0, parseFloat(leaseData.deposit_amount) - parseFloat(leaseData.deposit_paid_amount) - parseFloat(leaseData.deposit_waived_amount ?? '0'))
-    : 0;
+    : parseFloat(bill.deposit_due ?? '0');
 
   const [form, setForm] = useState({
-    amount: bill.total_due,
+    amount: bill.deposit_only ? bill.deposit_due : bill.total_due,
     channel: 'cash' as string,
     mpesaReceiptNumber: '',
     mpesaPhone: '',
@@ -87,10 +89,15 @@ function RecordPaymentModal({ bill, onClose, onSaved }: {
   async function submit() {
     const amt = parseFloat(form.amount);
     if (!amt || amt <= 0) { setError('Enter a valid amount'); return; }
+    if (bill.deposit_only && amt > depositOwed + 0.01) {
+      setError(`Payment exceeds the outstanding deposit of ${KES(depositOwed)}`);
+      return;
+    }
     if (form.splitDeposit) {
       const depAmt = parseFloat(form.depositAmount || '0');
       const rentPortion = amt - depAmt;
       if (depAmt <= 0) { setError('Enter a deposit amount to split'); return; }
+      if (depAmt > depositOwed + 0.01) { setError(`Deposit allocation exceeds the outstanding deposit of ${KES(depositOwed)}`); return; }
       if (rentPortion < 0) { setError('Total amount must be at least the deposit portion'); return; }
     }
     if (form.channel === 'mpesa_paybill' && !form.mpesaReceiptNumber) {
@@ -101,9 +108,12 @@ function RecordPaymentModal({ bill, onClose, onSaved }: {
     }
     setError(''); setLoading(true);
     try {
-      const depositAlloc = form.splitDeposit ? parseFloat(form.depositAmount || '0') : 0;
+      const depositAlloc = bill.deposit_only
+        ? amt
+        : form.splitDeposit ? parseFloat(form.depositAmount || '0') : 0;
       await apiClient.post('/payments', {
-        billId:             bill.id,
+        billId:             bill.deposit_only ? undefined : bill.id,
+        leaseId:            bill.deposit_only ? bill.lease_id : undefined,
         amount:             amt,
         channel:            form.channel,
         mpesaReceiptNumber: form.mpesaReceiptNumber || null,
@@ -121,6 +131,9 @@ function RecordPaymentModal({ bill, onClose, onSaved }: {
   }
 
   const outstanding = parseFloat(bill.total_due);
+  const totalOutstanding = bill.deposit_only
+    ? parseFloat(bill.deposit_due)
+    : outstanding + parseFloat(bill.deposit_due ?? '0');
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -147,7 +160,7 @@ function RecordPaymentModal({ bill, onClose, onSaved }: {
           <div className="bg-gray-50 rounded-xl p-4">
             <div className="flex justify-between items-start">
               <div>
-                <p className="text-xs text-gray-500">{MONTH(bill.for_month)} · {bill.bill_type === 'signing' ? 'Signing Bill' : 'Rent'}</p>
+                <p className="text-xs text-gray-500">{bill.deposit_only ? 'Deposit' : `${MONTH(bill.for_month)} · ${bill.bill_type === 'signing' ? 'Signing Bill' : 'Rent'}`}</p>
                 <p className="text-lg font-bold text-gray-900">{KES(bill.total_amount)}</p>
                 {bill.is_prorated && bill.proration_description && (
                   <p className="text-xs text-gray-400 mt-0.5">{bill.proration_description}</p>
@@ -155,7 +168,7 @@ function RecordPaymentModal({ bill, onClose, onSaved }: {
               </div>
               <div className="text-right">
                 <p className="text-xs text-gray-500">Outstanding</p>
-                <p className="text-lg font-bold text-red-600">{KES(outstanding)}</p>
+                <p className="text-lg font-bold text-red-600">{KES(totalOutstanding)}</p>
               </div>
             </div>
             {parseFloat(bill.total_paid) > 0 && (
@@ -190,7 +203,7 @@ function RecordPaymentModal({ bill, onClose, onSaved }: {
           </div>
 
           {/* Split deposit toggle — only shown if deposit is still owed */}
-          {depositOwed > 0 && (
+          {!bill.deposit_only && depositOwed > 0 && (
             <label className={`flex items-start gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition
               ${form.splitDeposit ? 'border-teal-500 bg-teal-50' : 'border-gray-200 hover:border-gray-300'}`}>
               <input type="checkbox" checked={form.splitDeposit}
@@ -320,7 +333,9 @@ function RecordPaymentModal({ bill, onClose, onSaved }: {
 function BillCard({ bill, onPay }: { bill: Bill; onPay: (b: Bill) => void }) {
   const pct = Math.min(100, (parseFloat(bill.total_paid) / parseFloat(bill.total_amount)) * 100);
   const canPay = ['open','partial','overdue'].includes(bill.status);
-  const isOverdue = bill.status === 'overdue' || (bill.status !== 'paid' && new Date(bill.due_date) < new Date());
+  const outstanding = parseFloat(bill.total_due) + (bill.deposit_only ? 0 : parseFloat(bill.deposit_due ?? '0'));
+  const isOverdue = bill.status === 'overdue' ||
+    (['open', 'partial'].includes(bill.status) && new Date(bill.due_date) < new Date());
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-all group overflow-hidden">
@@ -343,15 +358,18 @@ function BillCard({ bill, onPay }: { bill: Bill; onPay: (b: Bill) => void }) {
 
         <div className="flex items-center justify-between mb-3">
           <div>
-            <p className="text-xs text-gray-500">{MONTH(bill.for_month)}</p>
+            <p className="text-xs text-gray-500">{bill.deposit_only ? 'Deposit' : MONTH(bill.for_month)}</p>
             <p className="text-lg font-bold text-gray-900">{KES(bill.total_amount)}</p>
           </div>
-          {canPay && parseFloat(bill.total_due) > 0 && (
+          {canPay && outstanding > 0 && (
             <div className="text-right">
               <p className="text-xs text-gray-400">Outstanding</p>
               <p className="text-base font-bold" style={{ color: isOverdue ? '#ef4444' : '#374151' }}>
-                {KES(bill.total_due)}
+                {KES(outstanding)}
               </p>
+              {!bill.deposit_only && parseFloat(bill.deposit_due ?? '0') > 0 && (
+                <p className="text-[11px] text-gray-400">Includes deposit {KES(bill.deposit_due)}</p>
+              )}
             </div>
           )}
         </div>
@@ -368,7 +386,7 @@ function BillCard({ bill, onPay }: { bill: Bill; onPay: (b: Bill) => void }) {
         )}
 
         <div className="flex items-center justify-between text-xs text-gray-400 mb-1">
-          <span>Due {DATE(bill.due_date)}</span>
+          <span>{bill.deposit_only ? `Lease ${bill.lease_id.slice(0, 8)}` : `Due ${DATE(bill.due_date)}`}</span>
           <span className="font-mono">{bill.snap_account_reference}</span>
         </div>
 
@@ -404,6 +422,7 @@ function PaymentRow({ payment, onUndo }: { payment: Payment; onUndo: (p: Payment
           Unit {payment.unit_number} · {payment.bill_type === 'deposit' ? 'Deposit' : MONTH(payment.for_month)}
           {payment.mpesa_receipt_number && ` · ${payment.mpesa_receipt_number}`}
           {payment.bank_transaction_ref && ` · ${payment.bank_transaction_ref}`}
+          {Number(payment.deposit_amount) > 0 && ` · ${KES(payment.deposit_amount)} to deposit`}
         </p>
       </div>
       <div className="text-right shrink-0">
@@ -434,10 +453,36 @@ export default function PaymentsPage() {
   const { data: bills, isLoading: loadingBills } = useQuery({
     queryKey: ['bills', billFilter],
     queryFn: async () => {
-      const status = billFilter === 'unpaid' ? '' : 'all';
-      const url = status ? '/payments/bills' : '/payments/bills';
-      const res = await apiClient.get<{ data: { bills: Bill[] } }>(url);
-      return res.data.data.bills;
+    const [billRes, depositRes] = await Promise.all([
+      apiClient.get<{ data: { bills: Bill[] } }>('/payments/bills'),
+      apiClient.get<{ data: { deposits: Array<{
+        lease_id: string; tenant_name: string; tenant_phone: string;
+        unit_number: string; property_name: string; for_month: string;
+        due_date: string; deposit_due: string | number;
+      }> } }>('/payments/deposit-obligations'),
+    ]);
+    const depositBills: Bill[] = depositRes.data.data.deposits.map(deposit => ({
+      id: `deposit-${deposit.lease_id}`,
+      lease_id: deposit.lease_id,
+      tenant_name: deposit.tenant_name,
+      tenant_phone: deposit.tenant_phone,
+      unit_number: deposit.unit_number,
+      property_name: deposit.property_name,
+      for_month: deposit.for_month,
+      due_date: deposit.due_date,
+      bill_type: 'deposit',
+      rent_amount: '0',
+      total_amount: String(deposit.deposit_due),
+      total_paid: '0',
+      total_due: '0',
+      deposit_due: String(deposit.deposit_due),
+      status: 'open',
+      is_prorated: false,
+      proration_description: null,
+      snap_account_reference: 'Deposit',
+      deposit_only: true,
+    }));
+    return [...billRes.data.data.bills, ...depositBills];
     },
   });
 
@@ -453,7 +498,7 @@ export default function PaymentsPage() {
   const { data: summary } = useQuery({
     queryKey: ['payments-summary'],
     queryFn: async () => {
-      const res = await apiClient.get<{ data: { summary: { collected_mtd: string; total_outstanding: string; overdue_count: string } } }>('/payments/summary');
+      const res = await apiClient.get<{ data: { summary: { collected_mtd: string; total_outstanding: string; deposit_outstanding: string; overdue_count: string } } }>('/payments/summary');
       return res.data.data.summary;
     },
   });
@@ -475,7 +520,9 @@ export default function PaymentsPage() {
     setPaying(null);
   }
 
-  const overdueCount = (bills ?? []).filter(b => b.status === 'overdue' || (b.status !== 'paid' && new Date(b.due_date) < new Date())).length;
+  const overdueCount = (bills ?? []).filter(b =>
+    b.status === 'overdue' || (['open', 'partial'].includes(b.status) && new Date(b.due_date) < new Date())
+  ).length;
 
   return (
     <div className="p-6 lg:p-8 ">

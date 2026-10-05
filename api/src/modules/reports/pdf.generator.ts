@@ -154,6 +154,7 @@ async function buildIncomeStatement(data: any): Promise<Buffer> {
     ['Signing Bills',      data.revenue.signing_revenue],
     ['Penalties',          data.revenue.penalty_revenue],
     ['Adjustments',        data.revenue.adjustment_revenue],
+    ['Deposit Collections', data.revenue.deposit_revenue],
   ];
   revItems.forEach(([label, val], i) => {
     tableRow(doc, [{ value: label as string, width: 280 }, { value: KES(val as number), width: 180, align: 'right' }], i % 2 === 0);

@@ -108,6 +108,7 @@ async function buildIncomeStatement(wb: ExcelJS.Workbook, data: any): Promise<Bu
     ['Signing Bills',      data.revenue.signing_revenue],
     ['Penalty Revenue',    data.revenue.penalty_revenue],
     ['Adjustment Revenue', data.revenue.adjustment_revenue],
+    ['Deposit Collections', data.revenue.deposit_revenue],
   ];
   revItems.forEach(([label, val], i) => dataRow(ws, row++, [label, KES(val), ''], i % 2 === 0));
 

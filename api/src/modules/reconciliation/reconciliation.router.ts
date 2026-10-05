@@ -77,7 +77,12 @@ async function applyBankPaymentToLease(
   let firstPaymentId: string | null = null;
   let transactionRefAvailable = Boolean(input.transactionRef);
 
-  const recordPayment = async (billId: string | null, allocation: number, note: string) => {
+  const recordPayment = async (
+    billId: string | null,
+    allocation: number,
+    note: string,
+    depositAllocation = 0
+  ) => {
     if (allocation <= 0.01) return;
     const paymentId = randomUUID();
     const receiptNumber = `RCP-${Date.now().toString(36).toUpperCase()}-${paymentId.slice(0, 6).toUpperCase()}`;
@@ -87,12 +92,12 @@ async function applyBankPaymentToLease(
 
     await tx`
       INSERT INTO payments (
-        id, company_id, bill_id, lease_id, amount, channel,
+        id, company_id, bill_id, lease_id, amount, deposit_amount, channel,
         bank_transaction_ref, bank_name, bank_transaction_date,
         receipt_number, csv_import_batch_id, recorded_by,
         recorded_at, undo_expires_at, notes
       ) VALUES (
-        ${paymentId}, ${input.companyId}, ${billId}, ${input.leaseId}, ${allocation}, 'bank_transfer',
+        ${paymentId}, ${input.companyId}, ${billId}, ${input.leaseId}, ${allocation}, ${depositAllocation}, 'bank_transfer',
         ${paymentRef}, ${input.bankName}, ${input.transactionDate},
         ${receiptNumber}, ${input.batchId}, ${input.userId},
         NOW(), NOW() + INTERVAL '15 minutes', ${paymentNotes}
@@ -106,7 +111,7 @@ async function applyBankPaymentToLease(
 
   if (depositOwed > 0 && remaining > 0.01) {
     const depositAllocation = Math.min(remaining, depositOwed);
-    await recordPayment(null, depositAllocation, 'Bank reconciliation — deposit');
+    await recordPayment(null, depositAllocation, 'Bank reconciliation — deposit', depositAllocation);
     await tx`
       UPDATE leases SET
         deposit_paid_amount = deposit_paid_amount + ${depositAllocation},
@@ -122,7 +127,7 @@ async function applyBankPaymentToLease(
       FROM monthly_bills
       WHERE lease_id = ${input.leaseId}
         AND company_id = ${input.companyId}
-        AND status IN ('open', 'partial', 'overdue')
+        AND status IN ('open', 'partial', 'overdue', 'payment_received_pending_verification')
         AND total_due > 0
       ORDER BY CASE WHEN bill_type = 'signing' THEN 0 ELSE 1 END, due_date ASC, created_at ASC
       FOR UPDATE
@@ -191,7 +196,7 @@ reconciliationRouter.get('/assignment-leases', async (req: Request, res: Respons
   const leases = await withRLS(ctx(req), async (db) => {
     return db`
       SELECT
-        l.id, l.snap_account_reference,
+        l.id, l.snap_account_reference, l.status,
         t.full_name AS tenant_name, t.phone AS tenant_phone,
         u.unit_number, p.name AS property_name
       FROM leases l
@@ -199,7 +204,22 @@ reconciliationRouter.get('/assignment-leases', async (req: Request, res: Respons
       JOIN units u ON u.id = l.unit_id AND u.company_id = ${req.ctx.companyId!}
       JOIN properties p ON p.id = u.property_id AND p.company_id = ${req.ctx.companyId!}
       WHERE l.company_id = ${req.ctx.companyId!}
-        AND l.status IN ('active', 'notice')
+        AND l.status <> 'draft'
+        AND (
+          GREATEST(
+            COALESCE(l.deposit_amount, 0) -
+            COALESCE(l.deposit_paid_amount, 0) -
+            COALESCE(l.deposit_waived_amount, 0),
+            0
+          ) > 0
+          OR EXISTS (
+            SELECT 1 FROM monthly_bills mb
+            WHERE mb.lease_id = l.id
+              AND mb.company_id = l.company_id
+              AND mb.status IN ('open', 'partial', 'overdue', 'payment_received_pending_verification')
+              AND mb.total_due > 0
+          )
+        )
         AND (
           t.full_name ILIKE ${pattern}
           OR COALESCE(t.phone, '') ILIKE ${pattern}
@@ -346,13 +366,28 @@ reconciliationRouter.post('/import', async (req: Request, res: Response) => {
   const leases = await withRLS(ctx(req), async (db) => {
     return db`
       SELECT
-        l.id, l.snap_account_reference, t.id AS tenant_id,
+        l.id, l.snap_account_reference, l.status, t.id AS tenant_id,
         t.full_name AS tenant_name, t.phone AS tenant_phone,
         u.unit_number
       FROM leases l
       JOIN tenants t ON t.id = l.primary_tenant_id
       JOIN units u   ON u.id = l.unit_id
-      WHERE l.status IN ('active','notice')
+      WHERE l.status <> 'draft'
+        AND (
+          GREATEST(
+            COALESCE(l.deposit_amount, 0) -
+            COALESCE(l.deposit_paid_amount, 0) -
+            COALESCE(l.deposit_waived_amount, 0),
+            0
+          ) > 0
+          OR EXISTS (
+            SELECT 1 FROM monthly_bills mb
+            WHERE mb.lease_id = l.id
+              AND mb.company_id = l.company_id
+              AND mb.status IN ('open', 'partial', 'overdue', 'payment_received_pending_verification')
+              AND mb.total_due > 0
+          )
+        )
     `;
   });
 
@@ -395,8 +430,25 @@ reconciliationRouter.post('/import', async (req: Request, res: Response) => {
             SIMILARITY(l.snap_account_reference, ${refKey ?? ''}) AS score
           FROM leases l
           JOIN tenants t ON t.id = l.primary_tenant_id
-          WHERE SIMILARITY(l.snap_account_reference, ${refKey ?? ''}) > 0.2
+          WHERE l.status <> 'draft'
+            AND (
+              GREATEST(
+                COALESCE(l.deposit_amount, 0) -
+                COALESCE(l.deposit_paid_amount, 0) -
+                COALESCE(l.deposit_waived_amount, 0),
+                0
+              ) > 0
+              OR EXISTS (
+                SELECT 1 FROM monthly_bills mb
+                WHERE mb.lease_id = l.id
+                  AND mb.company_id = l.company_id
+                  AND mb.status IN ('open', 'partial', 'overdue', 'payment_received_pending_verification')
+                  AND mb.total_due > 0
+              )
+            )
+            AND (SIMILARITY(l.snap_account_reference, ${refKey ?? ''}) > 0.2
             OR SIMILARITY(t.full_name, ${row.payerName ?? ''}) > 0.3
+            )
           ORDER BY GREATEST(
             SIMILARITY(l.snap_account_reference, ${refKey ?? ''}),
             SIMILARITY(t.full_name, ${row.payerName ?? ''})
@@ -502,7 +554,22 @@ reconciliationRouter.post('/assign', async (req: Request, res: Response) => {
       FROM leases
       WHERE id = ${leaseId}
         AND company_id = ${companyId}
-        AND status IN ('active', 'notice')
+        AND status <> 'draft'
+        AND (
+          GREATEST(
+            COALESCE(deposit_amount, 0) -
+            COALESCE(deposit_paid_amount, 0) -
+            COALESCE(deposit_waived_amount, 0),
+            0
+          ) > 0
+          OR EXISTS (
+            SELECT 1 FROM monthly_bills mb
+            WHERE mb.lease_id = leases.id
+              AND mb.company_id = leases.company_id
+              AND mb.status IN ('open', 'partial', 'overdue', 'payment_received_pending_verification')
+              AND mb.total_due > 0
+          )
+        )
     `;
     if (!targetLease) throw new NotFoundError('Active lease', leaseId);
 

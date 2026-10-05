@@ -140,7 +140,7 @@ function OverviewTab({ agentName }: { agentName: string }) {
           <div>
             <p className="text-xs text-gray-400 mb-1">Outstanding</p>
             <p className="text-lg font-bold text-red-600">
-              {KES(Math.max(0, Number(month?.total_billed ?? 0) - Number(month?.total_collected ?? 0)))}
+              {KES(month?.total_outstanding ?? Math.max(0, Number(month?.total_billed ?? 0) - Number(month?.total_collected ?? 0)))}
             </p>
           </div>
         </div>
