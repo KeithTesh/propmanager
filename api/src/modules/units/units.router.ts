@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { randomUUID } from 'crypto';
 import { withRLS, withRLSTransaction } from '../../db';
 import { authenticate } from '../../middleware/auth';
-import { NotFoundError } from '../../lib/errors';
+import { AppError, NotFoundError } from '../../lib/errors';
 import { logger } from '../../lib/logger';
 import type { ApiResponse, RLSContext } from '../../types';
 
@@ -35,6 +35,7 @@ const UnitSchema = z.object({
 unitsRouter.get('/', async (req: Request, res: Response) => {
   const { propertyId } = req.query;
   const limit = z.coerce.number().int().min(1).max(100).optional().parse(req.query.limit);
+  const companyId = req.ctx.companyId!;
 
   const units = await withRLS(ctx(req), async (db) => {
     if (propertyId) {
@@ -51,12 +52,13 @@ unitsRouter.get('/', async (req: Request, res: Response) => {
           p.landlord_id,
           landlord.full_name AS landlord_name
         FROM units u
-        JOIN properties p ON p.id = u.property_id AND p.company_id = u.company_id
+        JOIN properties p ON p.id = u.property_id AND p.company_id = ${companyId}
         LEFT JOIN landlords landlord ON landlord.id = p.landlord_id
-          AND landlord.company_id = u.company_id AND landlord.deleted_at IS NULL
-        LEFT JOIN leases l ON l.unit_id = u.id AND l.company_id = u.company_id AND l.status = 'active'
-        LEFT JOIN tenants t ON t.id = l.primary_tenant_id
+          AND landlord.company_id = ${companyId} AND landlord.deleted_at IS NULL
+        LEFT JOIN leases l ON l.unit_id = u.id AND l.company_id = ${companyId} AND l.status = 'active'
+        LEFT JOIN tenants t ON t.id = l.primary_tenant_id AND t.company_id = ${companyId}
         WHERE u.property_id = ${propertyId as string}
+          AND u.company_id = ${companyId}
           AND u.deleted_at IS NULL
         ORDER BY u.unit_number
       `;
@@ -74,12 +76,13 @@ unitsRouter.get('/', async (req: Request, res: Response) => {
         t.full_name AS tenant_name,
         t.phone AS tenant_phone
       FROM units u
-      JOIN properties p ON p.id = u.property_id AND p.company_id = u.company_id
+      JOIN properties p ON p.id = u.property_id AND p.company_id = ${companyId}
       LEFT JOIN landlords landlord ON landlord.id = p.landlord_id
-        AND landlord.company_id = u.company_id AND landlord.deleted_at IS NULL
-      LEFT JOIN leases l ON l.unit_id = u.id AND l.company_id = u.company_id AND l.status = 'active'
-      LEFT JOIN tenants t ON t.id = l.primary_tenant_id
-      WHERE u.deleted_at IS NULL
+        AND landlord.company_id = ${companyId} AND landlord.deleted_at IS NULL
+      LEFT JOIN leases l ON l.unit_id = u.id AND l.company_id = ${companyId} AND l.status = 'active'
+      LEFT JOIN tenants t ON t.id = l.primary_tenant_id AND t.company_id = ${companyId}
+      WHERE u.company_id = ${companyId}
+        AND u.deleted_at IS NULL
         ${statusFilter === 'vacant'   ? db`AND u.is_occupied = false AND u.is_active = true` : db``}
         ${statusFilter === 'occupied' ? db`AND u.is_occupied = true` : db``}
       ${limit ? db`ORDER BY u.created_at DESC LIMIT ${limit}` : db`ORDER BY p.name, u.unit_number`}
@@ -93,6 +96,7 @@ unitsRouter.get('/', async (req: Request, res: Response) => {
 
 unitsRouter.get('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
+  const companyId = req.ctx.companyId!;
 
   const [unit] = await withRLS(ctx(req), async (db) => {
     return db`
@@ -109,10 +113,12 @@ unitsRouter.get('/:id', async (req: Request, res: Response) => {
         t.phone        AS tenant_phone,
         t.email        AS tenant_email
       FROM units u
-      JOIN properties p ON p.id = u.property_id
-      LEFT JOIN leases l ON l.unit_id = u.id AND l.status = 'active'
-      LEFT JOIN tenants t ON t.id = l.tenant_id
-      WHERE u.id = ${id} AND u.deleted_at IS NULL
+      JOIN properties p ON p.id = u.property_id AND p.company_id = ${companyId}
+      LEFT JOIN leases l ON l.unit_id = u.id AND l.company_id = ${companyId} AND l.status = 'active'
+      LEFT JOIN tenants t ON t.id = l.tenant_id AND t.company_id = ${companyId}
+      WHERE u.id = ${id}
+        AND u.company_id = ${companyId}
+        AND u.deleted_at IS NULL
     `;
   });
 
@@ -127,29 +133,43 @@ unitsRouter.post('/', async (req: Request, res: Response) => {
   const id        = randomUUID();
   const companyId = req.ctx.companyId!;
 
-  await withRLS(ctx(req), async (db) => {
-    // Check unit limit before inserting
-    const [company] = await db`
-      SELECT unit_limit, units_used, name FROM companies WHERE id = ${companyId}
+  await withRLSTransaction(ctx(req), async (tx) => {
+    const [company] = await tx`
+      SELECT unit_limit FROM companies WHERE id = ${companyId} FOR UPDATE
     `;
-    if (company && company.units_used >= company.unit_limit) {
-      res.status(403).json({
-        success: false,
-        error: {
-          code: 'UNIT_LIMIT_REACHED',
-          message: `You have reached your plan limit of ${company.unit_limit} units. Please upgrade your plan to add more units.`,
-        },
-      });
-      return;
+    if (!company) throw new NotFoundError('Company not found');
+
+    const [property] = await tx`
+      SELECT total_units FROM properties
+      WHERE id = ${data.propertyId} AND company_id = ${companyId} AND deleted_at IS NULL
+      FOR UPDATE
+    `;
+    if (!property) throw new NotFoundError('Property not found');
+
+    const [{ unit_count: propertyUnitCount }] = await tx`
+      SELECT COUNT(*)::int AS unit_count FROM units
+      WHERE property_id = ${data.propertyId} AND company_id = ${companyId} AND deleted_at IS NULL
+    `;
+    if (property.total_units !== null && propertyUnitCount >= property.total_units) {
+      throw new AppError(422, 'PROPERTY_UNIT_LIMIT_REACHED',
+        `This property is at its unit limit of ${property.total_units}. Increase the property's unit count to add more.`);
     }
 
-    // Warn at 80% — return warning in response header
-    const usagePercent = company ? Math.round((company.units_used / company.unit_limit) * 100) : 0;
-    if (usagePercent >= 80) {
-      res.setHeader('X-Unit-Limit-Warning', `${company.units_used}/${company.unit_limit} units used (${usagePercent}%)`);
+    const [{ unit_count: companyUnitCount }] = await tx`
+      SELECT COUNT(*)::int AS unit_count FROM units
+      WHERE company_id = ${companyId} AND deleted_at IS NULL
+    `;
+    if (companyUnitCount >= company.unit_limit) {
+      throw new AppError(403, 'UNIT_LIMIT_REACHED',
+        `You have reached your plan limit of ${company.unit_limit} units. Please upgrade your plan to add more units.`);
     }
 
-    await db`
+    const nextUsagePercent = Math.round((companyUnitCount / company.unit_limit) * 100);
+    if (nextUsagePercent >= 80) {
+      res.setHeader('X-Unit-Limit-Warning', `${companyUnitCount}/${company.unit_limit} units used (${nextUsagePercent}%)`);
+    }
+
+    await tx`
       INSERT INTO units (
         id, property_id, company_id,
         unit_number, unit_type, floor_number,
@@ -162,14 +182,8 @@ unitsRouter.post('/', async (req: Request, res: Response) => {
         ${data.isActive ?? true}, ${data.notes ?? null}
       )
     `;
-  });
-
-  // Update units_used count on company
-  await withRLS(ctx(req), async (db) => {
-    await db`
-      UPDATE companies SET
-        units_used = (SELECT COUNT(*) FROM units WHERE company_id = ${companyId} AND deleted_at IS NULL),
-        updated_at = NOW()
+    await tx`
+      UPDATE companies SET units_used = ${companyUnitCount + 1}, updated_at = NOW()
       WHERE id = ${companyId}
     `;
   });
@@ -220,15 +234,66 @@ unitsRouter.post('/bulk', async (req: Request, res: Response) => {
     });
   }
 
-  await withRLS(ctx(req), async (db) => {
-    await db`
-      INSERT INTO units ${db(units, 'id','property_id','company_id','unit_number','unit_type','bedrooms','bathrooms')}
-      ON CONFLICT (property_id, unit_number) DO NOTHING
+  const created = await withRLSTransaction(ctx(req), async (tx) => {
+    const [company] = await tx`
+      SELECT unit_limit FROM companies WHERE id = ${companyId} FOR UPDATE
     `;
+    if (!company) throw new NotFoundError('Company not found');
+
+    const [property] = await tx`
+      SELECT total_units FROM properties
+      WHERE id = ${data.propertyId} AND company_id = ${companyId} AND deleted_at IS NULL
+      FOR UPDATE
+    `;
+    if (!property) throw new NotFoundError('Property not found');
+
+    const unitNumbers = units.map(unit => unit.unit_number);
+    const existing = await tx`
+      SELECT unit_number FROM units
+      WHERE property_id = ${data.propertyId}
+        AND company_id = ${companyId}
+        AND deleted_at IS NULL
+        AND unit_number = ANY(${unitNumbers})
+    `;
+    const existingNumbers = new Set(existing.map(unit => unit.unit_number));
+    const missingUnits = units.filter(unit => !existingNumbers.has(unit.unit_number));
+    if (missingUnits.length === 0) return 0;
+
+    const [{ unit_count: propertyUnitCount }] = await tx`
+      SELECT COUNT(*)::int AS unit_count FROM units
+      WHERE property_id = ${data.propertyId} AND company_id = ${companyId} AND deleted_at IS NULL
+    `;
+    if (property.total_units !== null && propertyUnitCount + missingUnits.length > property.total_units) {
+      throw new AppError(422, 'PROPERTY_UNIT_LIMIT_REACHED',
+        `This request exceeds the property's unit limit of ${property.total_units}. Only ${Math.max(property.total_units - propertyUnitCount, 0)} more units can be added.`);
+    }
+
+    const [{ unit_count: companyUnitCount }] = await tx`
+      SELECT COUNT(*)::int AS unit_count FROM units
+      WHERE company_id = ${companyId} AND deleted_at IS NULL
+    `;
+    if (companyUnitCount + missingUnits.length > company.unit_limit) {
+      throw new AppError(403, 'UNIT_LIMIT_REACHED',
+        `This request exceeds your plan limit of ${company.unit_limit} units. Please upgrade your plan to add more.`);
+    }
+
+    const nextUsagePercent = Math.round((companyUnitCount / company.unit_limit) * 100);
+    if (nextUsagePercent >= 80) {
+      res.setHeader('X-Unit-Limit-Warning', `${companyUnitCount}/${company.unit_limit} units used (${nextUsagePercent}%)`);
+    }
+
+    await tx`
+      INSERT INTO units ${tx(missingUnits, 'id','property_id','company_id','unit_number','unit_type','bedrooms','bathrooms')}
+    `;
+    await tx`
+      UPDATE companies SET units_used = ${companyUnitCount + missingUnits.length}, updated_at = NOW()
+      WHERE id = ${companyId}
+    `;
+    return missingUnits.length;
   });
 
-  logger.info({ propertyId: data.propertyId, count: units.length }, 'Bulk units created');
-  res.status(201).json({ success: true, data: { created: units.length } } satisfies ApiResponse<unknown>);
+  logger.info({ propertyId: data.propertyId, count: created }, 'Bulk units created');
+  res.status(201).json({ success: true, data: { created } } satisfies ApiResponse<unknown>);
 });
 
 // ─── PATCH /units/:id ─────────────────────────────────────────────────────────
@@ -262,6 +327,7 @@ unitsRouter.patch('/:id', async (req: Request, res: Response) => {
 
 unitsRouter.delete('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
+  const companyId = req.ctx.companyId!;
 
   await withRLSTransaction(ctx(req), async (tx) => {
     const [active] = await tx`
@@ -273,7 +339,13 @@ unitsRouter.delete('/:id', async (req: Request, res: Response) => {
     }
     await tx`
       UPDATE units SET deleted_at = NOW(), updated_at = NOW()
-      WHERE id = ${id} AND deleted_at IS NULL
+      WHERE id = ${id} AND company_id = ${companyId} AND deleted_at IS NULL
+    `;
+    await tx`
+      UPDATE companies SET
+        units_used = (SELECT COUNT(*) FROM units WHERE company_id = ${companyId} AND deleted_at IS NULL),
+        updated_at = NOW()
+      WHERE id = ${companyId}
     `;
   });
 

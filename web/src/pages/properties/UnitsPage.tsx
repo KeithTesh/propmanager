@@ -1,7 +1,14 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient, getApiErrorMessage } from '../../lib/api';
+
+interface PropertyOption {
+  id: string;
+  name: string;
+  total_units: number | null;
+  unit_count: string | number;
+}
 
 interface Unit {
   id: string;
@@ -18,6 +25,107 @@ interface Unit {
   monthly_rent: string | null;
 }
 
+interface AddUnitModalProps {
+  properties: PropertyOption[];
+  onClose: () => void;
+  onSaved: () => void;
+}
+
+function AddUnitModal({ properties, onClose, onSaved }: AddUnitModalProps) {
+  const availableProperties = useMemo(() => properties.filter(property =>
+    property.total_units === null || Number(property.unit_count) < property.total_units
+  ), [properties]);
+  const [propertyId, setPropertyId] = useState(availableProperties[0]?.id ?? '');
+  const [unitNumber, setUnitNumber] = useState('');
+  const [unitType, setUnitType] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const selectedProperty = availableProperties.find(property => property.id === propertyId);
+  const remainingUnits = selectedProperty?.total_units === null || !selectedProperty
+    ? null
+    : selectedProperty.total_units - Number(selectedProperty.unit_count);
+
+  useEffect(() => {
+    if (!availableProperties.some(property => property.id === propertyId)) {
+      setPropertyId(availableProperties[0]?.id ?? '');
+    }
+  }, [availableProperties, propertyId]);
+
+  async function submit() {
+    if (!propertyId) { setError('Select a property with available unit spaces.'); return; }
+    if (!unitNumber.trim()) { setError('Unit number is required.'); return; }
+    setSaving(true);
+    setError('');
+    try {
+      await apiClient.post('/units', {
+        propertyId,
+        unitNumber: unitNumber.trim(),
+        unitType: unitType || null,
+      });
+      onSaved();
+    } catch (requestError) {
+      setError(getApiErrorMessage(requestError));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+      <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl">
+        <div className="flex items-center justify-between p-6 border-b border-gray-100">
+          <h2 className="text-lg font-bold text-gray-900">Add Unit</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600" aria-label="Close">✕</button>
+        </div>
+        <div className="p-6 space-y-4">
+          {error && <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-700">{error}</div>}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Property *</label>
+            <select value={propertyId} onChange={event => setPropertyId(event.target.value)}
+              disabled={!availableProperties.length}
+              className="w-full px-3.5 py-2.5 rounded-lg border border-gray-200 text-sm bg-white disabled:bg-gray-50">
+              {availableProperties.map(property => (
+                <option key={property.id} value={property.id}>
+                  {property.name} ({property.unit_count}{property.total_units === null ? '' : `/${property.total_units}`} units)
+                </option>
+              ))}
+            </select>
+            {selectedProperty && remainingUnits !== null && (
+              <p className="text-xs text-gray-500 mt-1">{remainingUnits} unit{remainingUnits === 1 ? '' : 's'} remaining for this property.</p>
+            )}
+            {!availableProperties.length && (
+              <p className="text-xs text-amber-700 mt-1">All properties have reached their configured unit limit.</p>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Unit Number *</label>
+              <input value={unitNumber} onChange={event => setUnitNumber(event.target.value)}
+                placeholder="A1, 101, Shop 2…" className="w-full px-3.5 py-2.5 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Unit Type</label>
+              <select value={unitType} onChange={event => setUnitType(event.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-lg border border-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-teal-500">
+                <option value="">Select…</option>
+                {Object.entries(UNIT_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
+        <div className="flex justify-end gap-3 p-6 border-t border-gray-100 bg-gray-50 rounded-b-2xl">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100">Cancel</button>
+          <button onClick={submit} disabled={saving || !availableProperties.length}
+            className="px-5 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-60"
+            style={{ background: '#0d9f9f' }}>
+            {saving ? 'Adding…' : 'Add Unit'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const UNIT_LABELS: Record<string, string> = {
   bedsitter: 'Bedsitter',
   studio: 'Studio',
@@ -31,14 +139,24 @@ const UNIT_LABELS: Record<string, string> = {
 
 export default function UnitsPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<'all' | 'occupied' | 'vacant'>('all');
+  const [showAddUnit, setShowAddUnit] = useState(false);
 
   const { data: units, isLoading, error } = useQuery({
     queryKey: ['units-directory'],
     queryFn: async () => {
       const response = await apiClient.get<{ data: { units: Unit[] } }>('/units');
       return response.data.data.units;
+    },
+  });
+
+  const { data: properties, isLoading: propertiesLoading, error: propertiesError } = useQuery({
+    queryKey: ['properties'],
+    queryFn: async () => {
+      const response = await apiClient.get<{ data: { properties: PropertyOption[] } }>('/properties');
+      return response.data.data.properties;
     },
   });
 
@@ -64,12 +182,22 @@ export default function UnitsPage() {
             {units ? `${units.length} ${units.length === 1 ? 'unit' : 'units'} across your properties` : 'View units across your properties'}
           </p>
         </div>
-        <button onClick={() => navigate('/properties')}
-          className="px-4 py-2.5 rounded-xl text-sm font-semibold text-white"
-          style={{ background: 'linear-gradient(135deg,#0d9f9f,#076666)' }}>
-          Manage Properties
-        </button>
+        <div className="flex items-center gap-3">
+          <button onClick={() => navigate('/properties')} className="text-sm font-semibold text-teal-700 hover:text-teal-800">
+            Manage Properties
+          </button>
+          <button onClick={() => setShowAddUnit(true)} disabled={propertiesLoading || !!propertiesError || !properties?.length}
+            className="px-4 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-60"
+            style={{ background: 'linear-gradient(135deg,#0d9f9f,#076666)' }}>
+            Add Unit
+          </button>
+        </div>
       </div>
+      {propertiesError && (
+        <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-700">
+          Could not load properties for unit creation: {getApiErrorMessage(propertiesError)}
+        </div>
+      )}
 
       <div className="flex flex-col sm:flex-row gap-3">
         <input value={search} onChange={event => setSearch(event.target.value)}
@@ -94,9 +222,10 @@ export default function UnitsPage() {
       ) : filteredUnits.length === 0 ? (
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-12 text-center">
           <p className="font-semibold text-gray-700">{search || status !== 'all' ? 'No matching units' : 'No units yet'}</p>
-          <p className="text-sm text-gray-500 mt-1">Units are managed from their property pages.</p>
-          <button onClick={() => navigate('/properties')} className="mt-4 text-sm font-semibold text-teal-700 hover:text-teal-800">
-            Go to Properties →
+          <p className="text-sm text-gray-500 mt-1">Add units here and choose the property they belong to.</p>
+          <button onClick={() => setShowAddUnit(true)} disabled={!properties?.length}
+            className="mt-4 text-sm font-semibold text-teal-700 hover:text-teal-800 disabled:opacity-50">
+            Add a unit →
           </button>
         </div>
       ) : (
@@ -150,6 +279,19 @@ export default function UnitsPage() {
             </table>
           </div>
         </div>
+      )}
+      {showAddUnit && properties && (
+        <AddUnitModal properties={properties}
+          onClose={() => setShowAddUnit(false)}
+          onSaved={() => {
+            setShowAddUnit(false);
+            queryClient.invalidateQueries({ queryKey: ['units-directory'] });
+            queryClient.invalidateQueries({ queryKey: ['units'] });
+            queryClient.invalidateQueries({ queryKey: ['units-vacant'] });
+            queryClient.invalidateQueries({ queryKey: ['properties'] });
+            queryClient.invalidateQueries({ queryKey: ['landlords'] });
+            queryClient.invalidateQueries({ queryKey: ['landlord'] });
+          }} />
       )}
     </div>
   );
