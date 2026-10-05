@@ -32,15 +32,15 @@ paymentsRouter.get('/', async (req: Request, res: Response) => {
         t.full_name     AS tenant_name,
         u.unit_number,
         pr.name         AS property_name,
-        mb.for_month,
-        mb.bill_type,
+        COALESCE(mb.for_month, p.bank_transaction_date, p.created_at::date) AS for_month,
+        COALESCE(mb.bill_type, 'deposit') AS bill_type,
         mb.total_amount AS bill_total
       FROM payments p
       JOIN leases l     ON l.id  = p.lease_id
       JOIN tenants t    ON t.id  = l.primary_tenant_id
       JOIN units u      ON u.id  = l.unit_id
       JOIN properties pr ON pr.id = u.property_id
-      JOIN monthly_bills mb ON mb.id = p.bill_id
+      LEFT JOIN monthly_bills mb ON mb.id = p.bill_id
       WHERE p.company_id = ${req.ctx.companyId}
         AND p.undone_at IS NULL
         ${leaseId ? db`AND p.lease_id = ${leaseId}` : db``}

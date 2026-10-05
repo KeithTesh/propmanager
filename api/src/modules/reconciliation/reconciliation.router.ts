@@ -3,10 +3,12 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { randomUUID } from 'crypto';
+import type postgres from 'postgres';
 import multer from 'multer';
 import { withRLS, withRLSTransaction } from '../../db';
 import { authenticate } from '../../middleware/auth';
 import { logger } from '../../lib/logger';
+import { NotFoundError, ValidationError } from '../../lib/errors';
 import type { ApiResponse, RLSContext } from '../../types';
 import { parseStatementFile, StatementFileError } from './statement-file';
 
@@ -41,6 +43,108 @@ function uploadStatementFile(req: Request, res: Response, next: NextFunction): v
 
 function ctx(req: Request): RLSContext {
   return { companyId: req.ctx.companyId!, userId: req.ctx.userId, userRole: req.ctx.userRole };
+}
+
+async function applyBankPaymentToLease(
+  tx: postgres.Sql,
+  input: {
+    companyId: string;
+    userId: string;
+    leaseId: string;
+    amount: number;
+    bankName: string;
+    transactionDate: string;
+    transactionRef: string | null;
+    batchId: string | null;
+  }
+): Promise<{ applied: number; firstPaymentId: string | null }> {
+  const [lease] = await tx`
+    SELECT deposit_amount, deposit_paid_amount, deposit_waived_amount
+    FROM leases
+    WHERE id = ${input.leaseId} AND company_id = ${input.companyId}
+    FOR UPDATE
+  `;
+  if (!lease) throw new NotFoundError('Lease', input.leaseId);
+
+  const depositOwed = Math.max(
+    0,
+    parseFloat(lease.deposit_amount ?? '0') -
+      parseFloat(lease.deposit_paid_amount ?? '0') -
+      parseFloat(lease.deposit_waived_amount ?? '0')
+  );
+  let remaining = input.amount;
+  let applied = 0;
+  let firstPaymentId: string | null = null;
+  let transactionRefAvailable = Boolean(input.transactionRef);
+
+  const recordPayment = async (billId: string | null, allocation: number, note: string) => {
+    if (allocation <= 0.01) return;
+    const paymentId = randomUUID();
+    const receiptNumber = `RCP-${Date.now().toString(36).toUpperCase()}-${paymentId.slice(0, 6).toUpperCase()}`;
+    const paymentRef = transactionRefAvailable ? input.transactionRef : null;
+    const paymentNotes = paymentRef ? note || null : [note, input.transactionRef ? `Statement ref: ${input.transactionRef}` : '']
+      .filter(Boolean).join(' · ') || null;
+
+    await tx`
+      INSERT INTO payments (
+        id, company_id, bill_id, lease_id, amount, channel,
+        bank_transaction_ref, bank_name, bank_transaction_date,
+        receipt_number, csv_import_batch_id, recorded_by,
+        recorded_at, undo_expires_at, notes
+      ) VALUES (
+        ${paymentId}, ${input.companyId}, ${billId}, ${input.leaseId}, ${allocation}, 'bank_transfer',
+        ${paymentRef}, ${input.bankName}, ${input.transactionDate},
+        ${receiptNumber}, ${input.batchId}, ${input.userId},
+        NOW(), NOW() + INTERVAL '15 minutes', ${paymentNotes}
+      )
+    `;
+    transactionRefAvailable = false;
+    firstPaymentId ??= paymentId;
+    applied += allocation;
+    remaining -= allocation;
+  };
+
+  if (depositOwed > 0 && remaining > 0.01) {
+    const depositAllocation = Math.min(remaining, depositOwed);
+    await recordPayment(null, depositAllocation, 'Bank reconciliation — deposit');
+    await tx`
+      UPDATE leases SET
+        deposit_paid_amount = deposit_paid_amount + ${depositAllocation},
+        deposit_paid_at = COALESCE(deposit_paid_at, CURRENT_DATE),
+        updated_at = NOW()
+      WHERE id = ${input.leaseId} AND company_id = ${input.companyId}
+    `;
+  }
+
+  if (remaining > 0.01) {
+    const bills = await tx`
+      SELECT id, bill_type, total_amount, total_paid, total_due
+      FROM monthly_bills
+      WHERE lease_id = ${input.leaseId}
+        AND company_id = ${input.companyId}
+        AND status IN ('open', 'partial', 'overdue')
+        AND total_due > 0
+      ORDER BY CASE WHEN bill_type = 'signing' THEN 0 ELSE 1 END, due_date ASC, created_at ASC
+      FOR UPDATE
+    `;
+
+    for (const bill of bills) {
+      if (remaining <= 0.01) break;
+      const allocation = Math.min(remaining, parseFloat(bill.total_due));
+      await recordPayment(bill.id, allocation, `Bank reconciliation — ${bill.bill_type}`);
+      const newPaid = parseFloat(bill.total_paid) + allocation;
+      const newStatus = newPaid >= parseFloat(bill.total_amount) - 0.01 ? 'paid' : 'partial';
+      await tx`
+        UPDATE monthly_bills
+        SET total_paid = total_paid + ${allocation},
+            status = ${newStatus},
+            updated_at = NOW()
+        WHERE id = ${bill.id} AND company_id = ${input.companyId}
+      `;
+    }
+  }
+
+  return { applied, firstPaymentId };
 }
 
 // ─── GET /reconciliation/batches — list import history ───────────────────────
@@ -79,6 +183,95 @@ reconciliationRouter.get('/unmatched', async (req: Request, res: Response) => {
     `;
   });
   res.json({ success: true, data: { unmatched } } satisfies ApiResponse<unknown>);
+});
+
+reconciliationRouter.get('/assignment-leases', async (req: Request, res: Response) => {
+  const { search } = z.object({ search: z.string().trim().min(2).max(100) }).parse(req.query);
+  const pattern = `%${search}%`;
+  const leases = await withRLS(ctx(req), async (db) => {
+    return db`
+      SELECT
+        l.id, l.snap_account_reference,
+        t.full_name AS tenant_name, t.phone AS tenant_phone,
+        u.unit_number, p.name AS property_name
+      FROM leases l
+      JOIN tenants t ON t.id = l.primary_tenant_id AND t.company_id = ${req.ctx.companyId!}
+      JOIN units u ON u.id = l.unit_id AND u.company_id = ${req.ctx.companyId!}
+      JOIN properties p ON p.id = u.property_id AND p.company_id = ${req.ctx.companyId!}
+      WHERE l.company_id = ${req.ctx.companyId!}
+        AND l.status IN ('active', 'notice')
+        AND (
+          t.full_name ILIKE ${pattern}
+          OR COALESCE(t.phone, '') ILIKE ${pattern}
+          OR COALESCE(l.snap_account_reference, '') ILIKE ${pattern}
+          OR u.unit_number ILIKE ${pattern}
+          OR p.name ILIKE ${pattern}
+        )
+      ORDER BY t.full_name, p.name, u.unit_number
+      LIMIT 25
+    `;
+  });
+  res.json({ success: true, data: { leases } } satisfies ApiResponse<unknown>);
+});
+
+reconciliationRouter.get('/unmatched/history', async (req: Request, res: Response) => {
+  const history = await withRLS(ctx(req), async (db) => {
+    return db`
+      SELECT
+        u.id, u.amount, u.payer_name, u.transaction_ref, u.transaction_date,
+        u.bank_name, u.resolution, u.resolved_at, u.resolution_notes,
+        u.resolved_payment_id, t.full_name AS tenant_name,
+        un.unit_number, p.name AS property_name
+      FROM unmatched_payments u
+      LEFT JOIN payments pay ON pay.id = u.resolved_payment_id
+      LEFT JOIN leases l ON l.id = COALESCE(pay.lease_id, u.suggested_lease_id)
+      LEFT JOIN tenants t ON t.id = l.primary_tenant_id
+      LEFT JOIN units un ON un.id = l.unit_id
+      LEFT JOIN properties p ON p.id = un.property_id
+      WHERE u.resolution <> 'pending'
+      ORDER BY u.resolved_at DESC NULLS LAST, u.created_at DESC
+      LIMIT 100
+    `;
+  });
+  res.json({ success: true, data: { history } } satisfies ApiResponse<unknown>);
+});
+
+reconciliationRouter.post('/unmatched/:id/dismiss', async (req: Request, res: Response) => {
+  const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+  const [dismissed] = await withRLS(ctx(req), async (db) => {
+    return db`
+      UPDATE unmatched_payments
+      SET resolution = 'dismissed',
+          resolved_by = ${req.ctx.userId},
+          resolved_at = NOW(),
+          resolution_notes = 'Dismissed by user'
+      WHERE id = ${id}
+        AND company_id = ${req.ctx.companyId!}
+        AND resolution = 'pending'
+      RETURNING id
+    `;
+  });
+  if (!dismissed) {
+    res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Pending unmatched transaction not found.' } });
+    return;
+  }
+  res.json({ success: true, data: { dismissed: 1 } } satisfies ApiResponse<unknown>);
+});
+
+reconciliationRouter.post('/unmatched/dismiss-all', async (req: Request, res: Response) => {
+  const dismissed = await withRLS(ctx(req), async (db) => {
+    return db`
+      UPDATE unmatched_payments
+      SET resolution = 'dismissed',
+          resolved_by = ${req.ctx.userId},
+          resolved_at = NOW(),
+          resolution_notes = 'Dismissed in bulk by user'
+      WHERE company_id = ${req.ctx.companyId!}
+        AND resolution = 'pending'
+      RETURNING id
+    `;
+  });
+  res.json({ success: true, data: { dismissed: dismissed.length } } satisfies ApiResponse<unknown>);
 });
 
 // ─── POST /reconciliation/import — process parsed statement rows ─────────────
@@ -153,7 +346,7 @@ reconciliationRouter.post('/import', async (req: Request, res: Response) => {
   const leases = await withRLS(ctx(req), async (db) => {
     return db`
       SELECT
-        l.id, l.snap_account_reference,
+        l.id, l.snap_account_reference, t.id AS tenant_id,
         t.full_name AS tenant_name, t.phone AS tenant_phone,
         u.unit_number
       FROM leases l
@@ -170,6 +363,21 @@ reconciliationRouter.post('/import', async (req: Request, res: Response) => {
   let matched = 0; let unmatched = 0; let duplicates = 0;
 
   for (const row of data.rows) {
+    const transactionRef = row.transactionRef?.trim() || null;
+    if (transactionRef) {
+      const [duplicate] = await withRLS(ctx(req), async (db) => {
+        return db`
+          SELECT id FROM payments
+          WHERE company_id = ${companyId}
+            AND bank_transaction_ref = ${transactionRef}
+        `;
+      });
+      if (duplicate) {
+        duplicates++;
+        continue;
+      }
+    }
+
     // Try to match: 1) account reference, 2) phone number
     const refKey   = row.payerReference?.toLowerCase().trim();
     const phoneKey = row.payerPhone?.replace(/\D/g,'');
@@ -221,77 +429,20 @@ reconciliationRouter.post('/import', async (req: Request, res: Response) => {
       continue;
     }
 
-    // Matched — find the open bill for this lease
-    const [bill] = await withRLS(ctx(req), async (db) => {
-      return db`
-        SELECT id, total_due, total_amount, total_paid, status
-        FROM monthly_bills
-        WHERE lease_id = ${lease.id}
-          AND status IN ('open','partial','overdue')
-        ORDER BY due_date ASC
-        LIMIT 1
-      `;
-    });
+    const allocation = await withRLSTransaction(ctx(req), tx => applyBankPaymentToLease(tx, {
+      companyId,
+      userId,
+      leaseId: lease.id,
+      amount: row.amount,
+      bankName: row.bankName ?? data.bankName,
+      transactionDate: row.transactionDate,
+      transactionRef,
+      batchId,
+    }));
+    if (allocation.applied > 0) matched++;
 
-    if (!bill) {
-      // No open rent bill — check if deposit is still owed
-      const [leaseDeposit] = await withRLS(ctx(req), async (db) => {
-        return db`
-          SELECT id, deposit_amount, deposit_paid_amount
-          FROM leases
-          WHERE id = ${lease.id} AND company_id = ${companyId}
-        `;
-      });
-
-      const depositOwed = leaseDeposit
-        ? Math.max(0, parseFloat(leaseDeposit.deposit_amount ?? '0') - parseFloat(leaseDeposit.deposit_paid_amount ?? '0'))
-        : 0;
-
-      if (depositOwed > 0) {
-        // Apply as deposit payment directly on the lease
-        const depositAlloc = Math.min(row.amount, depositOwed);
-        const receiptNumber = `RCP-${Date.now().toString(36).toUpperCase()}`;
-        const paymentId = randomUUID();
-
-        // Check for duplicate
-        const transactionRef = row.transactionRef;
-        if (transactionRef) {
-          const [dup] = await withRLS(ctx(req), async (db) => {
-            return db`SELECT id FROM payments WHERE company_id = ${companyId} AND bank_transaction_ref = ${transactionRef}`;
-          });
-          if (dup) { duplicates++; continue; }
-        }
-
-        await withRLSTransaction(ctx(req), async (tx) => {
-          // Record payment with no bill_id (deposit only)
-          await tx`
-            INSERT INTO payments (
-              id, company_id, lease_id,
-              amount, channel, bank_transaction_ref, bank_name,
-              bank_transaction_date, receipt_number, csv_import_batch_id,
-              recorded_by, recorded_at, undo_expires_at
-            ) VALUES (
-              ${paymentId}, ${companyId}, ${lease.id},
-              ${depositAlloc}, 'bank_transfer',
-              ${row.transactionRef ?? null}, ${data.bankName},
-              ${row.transactionDate}, ${receiptNumber}, ${batchId},
-              ${userId}, NOW(), NOW() + INTERVAL '15 minutes'
-            )
-          `;
-          // Update lease deposit_paid_amount
-          await tx`
-            UPDATE leases SET
-              deposit_paid_amount = deposit_paid_amount + ${depositAlloc},
-              deposit_paid_at     = COALESCE(deposit_paid_at, CURRENT_DATE),
-              updated_at          = NOW()
-            WHERE id = ${lease.id} AND company_id = ${companyId}
-          `;
-        });
-        matched++;
-        continue;
-      }
-
-      // No open bill and no deposit owed — goes to unmatched
+    const remaining = Math.max(0, row.amount - allocation.applied);
+    if (remaining > 0.01) {
       await withRLS(ctx(req), async (db) => {
         return db`
           INSERT INTO unmatched_payments (
@@ -301,83 +452,15 @@ reconciliationRouter.post('/import', async (req: Request, res: Response) => {
             suggested_lease_id, suggested_tenant_id, suggestion_confidence
           ) VALUES (
             ${companyId}, 'csv_import', ${batchId},
-            ${row.amount}, ${row.payerName ?? null}, ${row.payerReference ?? null},
-            ${row.payerPhone ?? null}, ${row.transactionRef ?? null},
-            ${row.transactionDate}, ${data.bankName}, ${JSON.stringify(row)},
-            ${lease.id}, null, 100
+            ${remaining}, ${row.payerName ?? null}, ${row.payerReference ?? null},
+            ${row.payerPhone ?? null}, ${transactionRef},
+            ${row.transactionDate}, ${row.bankName ?? data.bankName}, ${JSON.stringify(row)},
+            ${lease.id}, ${lease.tenant_id}, 100
           )
         `;
       });
       unmatched++;
-      continue;
     }
-
-    // Check for duplicate bank ref
-    const transactionRef = row.transactionRef;
-    if (transactionRef) {
-      const [dup] = await withRLS(ctx(req), async (db) => {
-        return db`SELECT id FROM payments WHERE company_id = ${companyId} AND bank_transaction_ref = ${transactionRef}`;
-      });
-      if (dup) { duplicates++; continue; }
-    }
-
-    // Record the payment
-    const receiptNumber = `RCP-${Date.now().toString(36).toUpperCase()}`;
-    const paymentId     = randomUUID();
-    const payAmt        = Math.min(row.amount, parseFloat(bill.total_due));
-    const leftover      = row.amount - payAmt; // amount beyond what the bill needs
-
-    await withRLSTransaction(ctx(req), async (tx) => {
-      await tx`
-        INSERT INTO payments (
-          id, company_id, bill_id, lease_id,
-          amount, channel, bank_transaction_ref, bank_name,
-          bank_transaction_date, receipt_number, csv_import_batch_id,
-          recorded_by, recorded_at, undo_expires_at
-        ) VALUES (
-          ${paymentId}, ${companyId}, ${bill.id}, ${lease.id},
-          ${payAmt}, 'bank_transfer',
-          ${row.transactionRef ?? null}, ${data.bankName},
-          ${row.transactionDate}, ${receiptNumber}, ${batchId},
-          ${userId}, NOW(), NOW() + INTERVAL '15 minutes'
-        )
-      `;
-
-      const newPaid   = parseFloat(bill.total_paid) + payAmt;
-      const newStatus = newPaid >= parseFloat(bill.total_amount) - 0.01 ? 'paid' : 'partial';
-
-      await tx`
-        UPDATE monthly_bills SET
-          total_paid = total_paid + ${payAmt},
-          status     = ${newStatus},
-          updated_at = NOW()
-        WHERE id = ${bill.id}
-      `;
-
-      // If there's leftover money, check if deposit is still owed and apply it
-      if (leftover > 0.01) {
-        const [leaseInfo] = await tx`
-          SELECT deposit_amount, deposit_paid_amount
-          FROM leases WHERE id = ${lease.id} AND company_id = ${companyId}
-        `;
-        const depositOwed = leaseInfo
-          ? Math.max(0, parseFloat(leaseInfo.deposit_amount ?? '0') - parseFloat(leaseInfo.deposit_paid_amount ?? '0'))
-          : 0;
-
-        if (depositOwed > 0) {
-          const depositAlloc = Math.min(leftover, depositOwed);
-          await tx`
-            UPDATE leases SET
-              deposit_paid_amount = deposit_paid_amount + ${depositAlloc},
-              deposit_paid_at     = COALESCE(deposit_paid_at, CURRENT_DATE),
-              updated_at          = NOW()
-            WHERE id = ${lease.id} AND company_id = ${companyId}
-          `;
-        }
-      }
-    });
-
-    matched++;
   }
 
   // Update batch stats
@@ -407,129 +490,59 @@ reconciliationRouter.post('/assign', async (req: Request, res: Response) => {
 
   const companyId = req.ctx.companyId!;
 
-  await withRLSTransaction(ctx(req), async (tx) => {
+  const assignment = await withRLSTransaction(ctx(req), async (tx) => {
     const [unmatched] = await tx`
       SELECT * FROM unmatched_payments
       WHERE id = ${unmatchedId} AND company_id = ${companyId} AND resolution = 'pending'
     `;
-    if (!unmatched) throw new Error('Unmatched payment not found');
+    if (!unmatched) throw new NotFoundError('Pending unmatched payment', unmatchedId);
 
-    const [bill] = await tx`
-      SELECT id, total_due, total_amount, total_paid, status
-      FROM monthly_bills
-      WHERE lease_id = ${leaseId}
+    const [targetLease] = await tx`
+      SELECT id, primary_tenant_id
+      FROM leases
+      WHERE id = ${leaseId}
         AND company_id = ${companyId}
-        AND status IN ('open','partial','overdue')
-      ORDER BY due_date ASC LIMIT 1
+        AND status IN ('active', 'notice')
     `;
+    if (!targetLease) throw new NotFoundError('Active lease', leaseId);
 
-    const receiptNumber = `RCP-${Date.now().toString(36).toUpperCase()}`;
-    const paymentId     = randomUUID();
-
-    if (!bill) {
-      // No open bill — check if deposit is still owed
-      const [leaseInfo] = await tx`
-        SELECT deposit_amount, deposit_paid_amount
-        FROM leases WHERE id = ${leaseId} AND company_id = ${companyId}
-      `;
-      const depositOwed = leaseInfo
-        ? Math.max(0, parseFloat(leaseInfo.deposit_amount ?? '0') - parseFloat(leaseInfo.deposit_paid_amount ?? '0'))
-        : 0;
-
-      if (depositOwed <= 0) throw new Error('No open bill or outstanding deposit found for this lease');
-
-      const depositAlloc = Math.min(parseFloat(unmatched.amount), depositOwed);
-
-      await tx`
-        INSERT INTO payments (
-          id, company_id, lease_id, amount, channel,
-          bank_transaction_ref, bank_name, bank_transaction_date,
-          receipt_number, csv_import_batch_id,
-          recorded_by, recorded_at, undo_expires_at
-        ) VALUES (
-          ${paymentId}, ${companyId}, ${leaseId},
-          ${depositAlloc}, 'bank_transfer',
-          ${unmatched.transaction_ref ?? null}, ${unmatched.bank_name ?? null},
-          ${unmatched.transaction_date ?? null},
-          ${receiptNumber}, ${unmatched.csv_import_batch_id ?? null},
-          ${req.ctx.userId}, NOW(), NOW() + INTERVAL '15 minutes'
-        )
-      `;
-
-      await tx`
-        UPDATE leases SET
-          deposit_paid_amount = deposit_paid_amount + ${depositAlloc},
-          deposit_paid_at     = COALESCE(deposit_paid_at, CURRENT_DATE),
-          updated_at          = NOW()
-        WHERE id = ${leaseId} AND company_id = ${companyId}
-      `;
-
-      await tx`
-        UPDATE unmatched_payments SET
-          resolution          = 'assigned',
-          resolved_by         = ${req.ctx.userId},
-          resolved_at         = NOW(),
-          resolved_payment_id = ${paymentId}
-        WHERE id = ${unmatchedId}
-      `;
-
-      return;
+    const allocation = await applyBankPaymentToLease(tx, {
+      companyId,
+      userId: req.ctx.userId,
+      leaseId,
+      amount: parseFloat(unmatched.amount),
+      bankName: unmatched.bank_name ?? 'Bank transfer',
+      transactionDate: unmatched.transaction_date,
+      transactionRef: unmatched.transaction_ref,
+      batchId: unmatched.csv_import_batch_id,
+    });
+    if (allocation.applied <= 0.01 || !allocation.firstPaymentId) {
+      throw new ValidationError('The selected lease has no outstanding deposit or bill to apply this payment to.');
     }
 
-    const payAmt = Math.min(parseFloat(unmatched.amount), parseFloat(bill.total_due));
-
-    await tx`
-      INSERT INTO payments (
-        id, company_id, bill_id, lease_id, amount, channel,
-        bank_transaction_ref, bank_name, bank_transaction_date,
-        receipt_number, csv_import_batch_id,
-        recorded_by, recorded_at, undo_expires_at
-      ) VALUES (
-        ${paymentId}, ${companyId}, ${bill.id}, ${leaseId},
-        ${payAmt}, 'bank_transfer',
-        ${unmatched.transaction_ref ?? null}, ${unmatched.bank_name ?? null},
-        ${unmatched.transaction_date ?? null},
-        ${receiptNumber}, ${unmatched.csv_import_batch_id ?? null},
-        ${req.ctx.userId}, NOW(), NOW() + INTERVAL '15 minutes'
-      )
-    `;
-
-    const newPaid   = parseFloat(bill.total_paid) + payAmt;
-    const newStatus = newPaid >= parseFloat(bill.total_amount) - 0.01 ? 'paid' : 'partial';
-
-    await tx`UPDATE monthly_bills SET total_paid = total_paid + ${payAmt}, status = ${newStatus}, updated_at = NOW() WHERE id = ${bill.id}`;
-
-    // Apply any leftover to deposit if still owed
-    const leftover = parseFloat(unmatched.amount) - payAmt;
-    if (leftover > 0.01) {
-      const [leaseInfo] = await tx`
-        SELECT deposit_amount, deposit_paid_amount
-        FROM leases WHERE id = ${leaseId} AND company_id = ${companyId}
-      `;
-      const depositOwed = leaseInfo
-        ? Math.max(0, parseFloat(leaseInfo.deposit_amount ?? '0') - parseFloat(leaseInfo.deposit_paid_amount ?? '0'))
-        : 0;
-      if (depositOwed > 0) {
-        const depositAlloc = Math.min(leftover, depositOwed);
-        await tx`
-          UPDATE leases SET
-            deposit_paid_amount = deposit_paid_amount + ${depositAlloc},
-            deposit_paid_at     = COALESCE(deposit_paid_at, CURRENT_DATE),
-            updated_at          = NOW()
-          WHERE id = ${leaseId} AND company_id = ${companyId}
-        `;
-      }
-    }
-
+    const remaining = Math.max(0, parseFloat(unmatched.amount) - allocation.applied);
     await tx`
       UPDATE unmatched_payments SET
-        resolution         = 'assigned',
-        resolved_by        = ${req.ctx.userId},
-        resolved_at        = NOW(),
-        resolved_payment_id = ${paymentId}
+        amount = ${remaining > 0.01 ? remaining : unmatched.amount},
+        suggested_lease_id = ${leaseId},
+        suggested_tenant_id = ${targetLease.primary_tenant_id},
+        resolution = ${remaining > 0.01 ? 'pending' : 'assigned'},
+        resolved_by = ${remaining > 0.01 ? null : req.ctx.userId},
+        resolved_at = ${remaining > 0.01 ? null : new Date()},
+        resolved_payment_id = ${remaining > 0.01 ? null : allocation.firstPaymentId},
+        resolution_notes = ${remaining > 0.01 ? `KES ${allocation.applied} assigned; KES ${remaining} remains pending` : null}
       WHERE id = ${unmatchedId}
     `;
+    return { applied: allocation.applied, remaining };
   });
 
-  res.json({ success: true, data: { message: 'Payment assigned and recorded' } } satisfies ApiResponse<unknown>);
+  res.json({
+    success: true,
+    data: {
+      ...assignment,
+      message: assignment.remaining > 0.01
+        ? `KES ${assignment.applied.toLocaleString()} applied to the selected lease; KES ${assignment.remaining.toLocaleString()} remains pending.`
+        : 'Payment applied to the selected lease, deposit first, then outstanding bills.',
+    },
+  } satisfies ApiResponse<unknown>);
 });

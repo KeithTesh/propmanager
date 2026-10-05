@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { randomUUID } from 'crypto';
 import { withRLS, withRLSTransaction } from '../../db';
 import { authenticate } from '../../middleware/auth';
-import { NotFoundError } from '../../lib/errors';
+import { ForbiddenError, NotFoundError, ValidationError } from '../../lib/errors';
 import { logger } from '../../lib/logger';
 import { calculateProration } from '../../lib/prorationEngine';
 import type { ApiResponse, RLSContext } from '../../types';
@@ -311,18 +311,86 @@ leasesRouter.post('/', async (req: Request, res: Response) => {
 
 leasesRouter.patch('/:id/terminate', async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { reason, actualMoveOutDate } = z.object({
+  const { reason, actualMoveOutDate, writeOffOutstanding, writeOffReason } = z.object({
     reason:            z.string().min(1),
     actualMoveOutDate: z.string().optional(),
+    writeOffOutstanding: z.boolean().optional().default(false),
+    writeOffReason: z.string().trim().optional(),
   }).parse(req.body);
 
   await withRLSTransaction(ctx(req), async (tx) => {
     const [lease] = await tx`
-      SELECT id, unit_id, status FROM leases WHERE id = ${id}
+      SELECT id, unit_id, status, deposit_amount, deposit_paid_amount, deposit_waived_amount
+      FROM leases
+      WHERE id = ${id} AND company_id = ${req.ctx.companyId}
+      FOR UPDATE
     `;
     if (!lease) throw new NotFoundError('Lease not found');
     if (!['active','notice'].includes(lease.status)) {
       throw new Error('Only active or notice leases can be terminated');
+    }
+
+    const outstandingBills = await tx`
+      SELECT id, total_due
+      FROM monthly_bills
+      WHERE lease_id = ${id}
+        AND company_id = ${req.ctx.companyId}
+        AND status IN ('open', 'partial', 'overdue', 'payment_received_pending_verification')
+        AND total_due > 0
+      FOR UPDATE
+    `;
+    const billBalance = outstandingBills.reduce((sum, bill) => sum + Number(bill.total_due), 0);
+    const depositBalance = Math.max(
+      0,
+      Number(lease.deposit_amount ?? 0) -
+        Number(lease.deposit_paid_amount ?? 0) -
+        Number(lease.deposit_waived_amount ?? 0)
+    );
+    const totalOutstanding = billBalance + depositBalance;
+
+    if (totalOutstanding > 0.01 && !writeOffOutstanding) {
+      throw new ValidationError(
+        `This lease has KES ${totalOutstanding.toLocaleString()} outstanding. Clear the balance or have an owner explicitly write it off before termination.`
+      );
+    }
+
+    if (writeOffOutstanding) {
+      if (req.ctx.userRole !== 'owner') {
+        throw new ForbiddenError('Only the company owner can write off outstanding balances during termination.');
+      }
+      if (totalOutstanding <= 0.01) {
+        throw new ValidationError('There is no outstanding balance to write off.');
+      }
+      if (!writeOffReason?.trim()) {
+        throw new ValidationError('Provide a reason for writing off the outstanding balance.');
+      }
+
+      if (outstandingBills.length > 0) {
+        await tx`
+          UPDATE monthly_bills
+          SET status = 'waived',
+              waived_by = ${req.ctx.userId},
+              waived_at = NOW(),
+              waive_reason = ${writeOffReason.trim()},
+              updated_at = NOW()
+          WHERE lease_id = ${id}
+            AND company_id = ${req.ctx.companyId}
+            AND status IN ('open', 'partial', 'overdue', 'payment_received_pending_verification')
+            AND total_due > 0
+        `;
+      }
+
+      if (depositBalance > 0.01) {
+        await tx`
+          UPDATE leases
+          SET deposit_waived_amount = deposit_waived_amount + ${depositBalance},
+              deposit_waived_by = ${req.ctx.userId},
+              deposit_waived_at = NOW(),
+              deposit_waive_reason = ${writeOffReason.trim()},
+              updated_at = NOW()
+          WHERE id = ${id} AND company_id = ${req.ctx.companyId}
+        `;
+      }
     }
 
     await tx`
@@ -382,6 +450,23 @@ leasesRouter.patch('/:id/deposit', async (req: Request, res: Response) => {
   const paidDate = paidAt ?? new Date().toISOString().slice(0, 10);
 
   const updated = await withRLSTransaction(ctx(req), async (tx) => {
+    const [currentLease] = await tx`
+      SELECT deposit_amount, deposit_paid_amount, deposit_waived_amount
+      FROM leases
+      WHERE id = ${id} AND company_id = ${req.ctx.companyId} AND status IN ('active','notice')
+      FOR UPDATE
+    `;
+    if (!currentLease) return null;
+    const depositOwed = Math.max(
+      0,
+      Number(currentLease.deposit_amount) -
+        Number(currentLease.deposit_paid_amount) -
+        Number(currentLease.deposit_waived_amount ?? 0)
+    );
+    if (amountPaid > depositOwed + 0.01) {
+      throw new ValidationError(`Deposit payment exceeds the remaining amount of KES ${depositOwed.toLocaleString()}.`);
+    }
+
     // 1. Update lease deposit tracking
     const [lease] = await tx`
       UPDATE leases SET

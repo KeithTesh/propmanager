@@ -59,12 +59,12 @@ function RecordPaymentModal({ bill, onClose, onSaved }: {
   const { data: leaseData } = useQuery({
     queryKey: ['lease-deposit', bill.lease_id],
     queryFn: async () => {
-      const res = await apiClient.get<{ data: { lease: { deposit_amount: string; deposit_paid_amount: string } } }>(`/leases/${bill.lease_id}`);
+      const res = await apiClient.get<{ data: { lease: { deposit_amount: string; deposit_paid_amount: string; deposit_waived_amount?: string } } }>(`/leases/${bill.lease_id}`);
       return res.data.data.lease;
     },
   });
   const depositOwed = leaseData
-    ? Math.max(0, parseFloat(leaseData.deposit_amount) - parseFloat(leaseData.deposit_paid_amount))
+    ? Math.max(0, parseFloat(leaseData.deposit_amount) - parseFloat(leaseData.deposit_paid_amount) - parseFloat(leaseData.deposit_waived_amount ?? '0'))
     : 0;
 
   const [form, setForm] = useState({
@@ -401,7 +401,7 @@ function PaymentRow({ payment, onUndo }: { payment: Payment; onUndo: (p: Payment
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium text-gray-900 truncate">{payment.tenant_name}</p>
         <p className="text-xs text-gray-400">
-          Unit {payment.unit_number} · {MONTH(payment.for_month)}
+          Unit {payment.unit_number} · {payment.bill_type === 'deposit' ? 'Deposit' : MONTH(payment.for_month)}
           {payment.mpesa_receipt_number && ` · ${payment.mpesa_receipt_number}`}
           {payment.bank_transaction_ref && ` · ${payment.bank_transaction_ref}`}
         </p>

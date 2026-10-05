@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient, getApiErrorMessage } from '../../lib/api';
 import { useToast } from '../../components/ui/Toast';
+import { useAuthStore } from '../../stores/authStore';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -18,6 +19,7 @@ interface Lease {
   snap_account_reference: string;
   deposit_paid_amount: string;
   deposit_paid_at: string | null;
+  deposit_waived_amount?: string;
   created_at: string;
 }
 
@@ -100,16 +102,21 @@ function LeaseCard({ lease, onTerminate, onNotice, onDeposit, onRenew }: {
         {parseFloat(lease.deposit_amount) > 0 && (
           <div className="flex items-center justify-between text-xs mb-3">
             <span className="text-gray-500">Deposit</span>
-            {parseFloat(lease.deposit_paid_amount) >= parseFloat(lease.deposit_amount) ? (
+            {parseFloat(lease.deposit_paid_amount) + parseFloat(lease.deposit_waived_amount ?? '0') >= parseFloat(lease.deposit_amount) ? (
               <span className="text-emerald-600 font-medium flex items-center gap-1">
                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
                 </svg>
-                {KES(lease.deposit_amount)} collected
+                {parseFloat(lease.deposit_waived_amount ?? '0') > 0
+                  ? `${KES(lease.deposit_paid_amount)} paid · ${KES(lease.deposit_waived_amount ?? '0')} written off`
+                  : `${KES(lease.deposit_amount)} collected`}
               </span>
             ) : parseFloat(lease.deposit_paid_amount) > 0 ? (
               <span className="text-amber-600 font-medium">
-                {KES(lease.deposit_paid_amount)} / {KES(lease.deposit_amount)}
+                {KES(lease.deposit_paid_amount)} paid
+                {parseFloat(lease.deposit_waived_amount ?? '0') > 0
+                  ? ` · ${KES(lease.deposit_waived_amount ?? '0')} written off`
+                  : ` / ${KES(lease.deposit_amount)}`}
               </span>
             ) : (
               <button onClick={() => onDeposit(lease)}
@@ -135,7 +142,7 @@ function LeaseCard({ lease, onTerminate, onNotice, onDeposit, onRenew }: {
         {/* Actions */}
         {(isActive || isNotice) && (
           <div className="flex gap-2 pt-3 border-t border-gray-100 opacity-0 group-hover:opacity-100 transition-opacity">
-            {isActive && parseFloat(lease.deposit_paid_amount) < parseFloat(lease.deposit_amount) && parseFloat(lease.deposit_amount) > 0 && (
+            {isActive && parseFloat(lease.deposit_paid_amount) + parseFloat(lease.deposit_waived_amount ?? '0') < parseFloat(lease.deposit_amount) && parseFloat(lease.deposit_amount) > 0 && (
               <button onClick={() => onDeposit(lease)}
                 className="flex-1 py-1.5 rounded-lg text-xs font-medium text-teal-600 bg-teal-50 hover:bg-teal-100 transition">
                 Deposit
@@ -560,7 +567,7 @@ function RenewModal({ lease, onClose, onDone }: { lease: Lease; onClose: () => v
 // ─── Deposit Modal ────────────────────────────────────────────────────────────
 
 function DepositModal({ lease, onClose, onDone }: { lease: Lease; onClose: () => void; onDone: () => void }) {
-  const remaining = parseFloat(lease.deposit_amount) - parseFloat(lease.deposit_paid_amount);
+  const remaining = parseFloat(lease.deposit_amount) - parseFloat(lease.deposit_paid_amount) - parseFloat(lease.deposit_waived_amount ?? '0');
   const [amount,  setAmount]  = useState(String(remaining));
   const [paidAt,  setPaidAt]  = useState(new Date().toISOString().slice(0, 10));
   const [loading, setLoading] = useState(false);
@@ -589,12 +596,12 @@ function DepositModal({ lease, onClose, onDone }: { lease: Lease; onClose: () =>
         <div className="bg-gray-50 rounded-xl p-4 mb-4">
           <div className="flex justify-between text-xs text-gray-500 mb-2">
             <span>Collected</span>
-            <span>{KES(lease.deposit_paid_amount)} of {KES(lease.deposit_amount)}</span>
+            <span>{KES(lease.deposit_paid_amount)} paid · {KES(lease.deposit_waived_amount ?? '0')} written off</span>
           </div>
           <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
             <div className="h-full rounded-full transition-all"
               style={{
-                width: `${Math.min(100, (parseFloat(lease.deposit_paid_amount) / parseFloat(lease.deposit_amount)) * 100)}%`,
+                width: `${Math.min(100, ((parseFloat(lease.deposit_paid_amount) + parseFloat(lease.deposit_waived_amount ?? '0')) / parseFloat(lease.deposit_amount)) * 100)}%`,
                 background: '#0d9f9f'
               }} />
           </div>
@@ -636,16 +643,35 @@ function DepositModal({ lease, onClose, onDone }: { lease: Lease; onClose: () =>
 // ─── Terminate Modal ──────────────────────────────────────────────────────────
 
 function TerminateModal({ lease, onClose, onDone }: { lease: Lease; onClose: () => void; onDone: () => void }) {
+  const user = useAuthStore(s => s.user);
+  const depositOutstanding = Math.max(
+    0,
+    parseFloat(lease.deposit_amount) -
+      parseFloat(lease.deposit_paid_amount) -
+      parseFloat(lease.deposit_waived_amount ?? '0')
+  );
+  const totalOutstanding = parseFloat(lease.outstanding_balance) + depositOutstanding;
   const [reason, setReason]   = useState('');
   const [moveOut, setMoveOut] = useState('');
+  const [writeOffOutstanding, setWriteOffOutstanding] = useState(false);
+  const [writeOffReason, setWriteOffReason] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState('');
 
   async function submit() {
     if (!reason.trim()) { setError('Please provide a reason'); return; }
+    if (writeOffOutstanding && !writeOffReason.trim()) {
+      setError('Please provide a reason for writing off the outstanding balance.');
+      return;
+    }
     setLoading(true); setError('');
     try {
-      await apiClient.patch(`/leases/${lease.id}/terminate`, { reason, actualMoveOutDate: moveOut || undefined });
+      await apiClient.patch(`/leases/${lease.id}/terminate`, {
+        reason,
+        actualMoveOutDate: moveOut || undefined,
+        writeOffOutstanding,
+        writeOffReason: writeOffOutstanding ? writeOffReason.trim() : undefined,
+      });
       onDone();
     } catch (e) { setError(getApiErrorMessage(e)); setLoading(false); }
   }
@@ -669,6 +695,33 @@ function TerminateModal({ lease, onClose, onDone }: { lease: Lease; onClose: () 
             <label className="block text-sm font-medium text-gray-700 mb-1.5">Actual Move-Out Date</label>
             <input type="date" value={moveOut} onChange={e => setMoveOut(e.target.value)} className={inputCls} />
           </div>
+          {totalOutstanding > 0.01 && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              Unpaid bills and deposit: <strong>{KES(totalOutstanding)}</strong>. They must be paid before termination.
+              {user?.role === 'owner' && (
+                <div className="mt-3 border-t border-amber-200 pt-3">
+                  <label className="flex items-start gap-2">
+                    <input
+                      type="checkbox"
+                      checked={writeOffOutstanding}
+                      onChange={e => setWriteOffOutstanding(e.target.checked)}
+                      className="mt-0.5"
+                    />
+                    <span>Write off this balance and terminate the lease. This action is recorded in the audit trail.</span>
+                  </label>
+                  {writeOffOutstanding && (
+                    <textarea
+                      value={writeOffReason}
+                      onChange={e => setWriteOffReason(e.target.value)}
+                      rows={2}
+                      placeholder="Reason for writing off the balance"
+                      className={inputCls + ' mt-2 resize-none'}
+                    />
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
         {error && <div className="mt-3 p-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-700">{error}</div>}
         <div className="flex justify-end gap-3 mt-5">
