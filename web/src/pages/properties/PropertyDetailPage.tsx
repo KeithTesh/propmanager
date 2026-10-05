@@ -406,6 +406,7 @@ export default function PropertyDetailPage() {
 
   function refresh() {
     qc.invalidateQueries({ queryKey: ['units', id] });
+    qc.invalidateQueries({ queryKey: ['units'] });
     qc.invalidateQueries({ queryKey: ['property', id] });
     qc.invalidateQueries({ queryKey: ['properties'] });
     setShowUnit(false); setEditing(null); setArchiving(null);

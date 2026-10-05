@@ -263,7 +263,12 @@ export default function PropertiesPage() {
     },
   });
 
-  function refresh() { qc.invalidateQueries({ queryKey:['properties'] }); setShowModal(false); setEditing(null); setDeleting(null); }
+  function refresh() {
+    qc.invalidateQueries({ queryKey:['properties'] });
+    qc.invalidateQueries({ queryKey:['landlords'] });
+    qc.invalidateQueries({ queryKey:['landlord'] });
+    setShowModal(false); setEditing(null); setDeleting(null);
+  }
 
   const props = (data??[]).filter(p => !search ||
     p.name.toLowerCase().includes(search.toLowerCase()) ||

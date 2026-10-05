@@ -3,7 +3,7 @@
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '../../stores/authStore';
-import { apiClient } from '../../lib/api';
+import { apiClient, getApiErrorMessage } from '../../lib/api';
 
 interface DashboardStats {
   occupancy: { total_units: string; occupied: string; vacant: string; total_properties: string; };
@@ -13,6 +13,19 @@ interface DashboardStats {
   recentPayments: { id: string; amount: string; channel: string; receipt_number: string; recorded_at: string; tenant_name: string; unit_number: string; property_name: string; }[];
   recentLeases: { id: string; status: string; start_date: string; created_at: string; monthly_rent: string; tenant_name: string; unit_number: string; property_name: string; }[];
   maintenanceSummary: { open_count: string; urgent_count: string; unacknowledged: string };
+}
+
+interface DashboardUnit {
+  id: string;
+  unit_number: string;
+  unit_type: string | null;
+  is_occupied: boolean;
+  is_active: boolean;
+  property_id: string;
+  property_name: string;
+  landlord_id: string | null;
+  landlord_name: string | null;
+  tenant_name: string | null;
 }
 
 const KES_SHORT = (n: string | number) => {
@@ -109,6 +122,7 @@ function BillStatusBar({ status }: { status: DashboardStats['billStatus'] }) {
 export default function DashboardHome() {
   const { user, company } = useAuthStore();
   const navigate = useNavigate();
+  const isAgent = (company as (typeof company & { accountType?: string }))?.accountType === 'agent';
   const hour = new Date().getHours();
   const greeting = hour<12?'Good morning':hour<17?'Good afternoon':'Good evening';
 
@@ -119,6 +133,15 @@ export default function DashboardHome() {
       return res.data.data;
     },
     refetchInterval: 5 * 60 * 1000,
+  });
+
+  const { data: dashboardUnits, isLoading: unitsLoading, error: unitsError } = useQuery({
+    queryKey: ['units', 'dashboard'],
+    queryFn: async () => {
+      const response = await apiClient.get<{ data: { units: DashboardUnit[] } }>('/units?limit=6');
+      return response.data.data.units;
+    },
+    enabled: isAgent,
   });
 
   const occ = stats?.occupancy;
@@ -335,6 +358,46 @@ export default function DashboardHome() {
           </div>
         )}
       </div>
+      {isAgent && (
+        <section className={`${C} p-6`}>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-900">Units</h2>
+              <p className="text-xs text-gray-400 mt-0.5">Recent units across your landlord properties</p>
+            </div>
+            <button onClick={() => navigate('/units')} className="text-xs text-teal-600 font-semibold hover:text-teal-800 transition">
+              View all units →
+            </button>
+          </div>
+          {unitsLoading ? (
+            <p className="text-sm text-gray-400 py-4 text-center">Loading units…</p>
+          ) : unitsError ? (
+            <p className="text-sm text-red-700 py-4 text-center">Could not load units: {getApiErrorMessage(unitsError)}</p>
+          ) : !dashboardUnits?.length ? (
+            <p className="text-sm text-gray-400 py-4 text-center">No units yet. Add units from a property page.</p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {dashboardUnits.map(unit => (
+                <button key={unit.id} onClick={() => navigate(`/properties/${unit.property_id}`)}
+                  className="text-left p-3 rounded-xl border border-gray-100 hover:border-teal-200 hover:bg-teal-50/30 transition">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-gray-900 truncate">Unit {unit.unit_number}</p>
+                    <span className={`shrink-0 text-xs font-semibold px-2 py-0.5 rounded-full ${
+                      unit.is_occupied ? 'bg-emerald-50 text-emerald-700' : unit.is_active ? 'bg-amber-50 text-amber-700' : 'bg-gray-100 text-gray-600'
+                    }`}>
+                      {unit.is_occupied ? 'Occupied' : unit.is_active ? 'Vacant' : 'Inactive'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1 truncate">{unit.property_name}</p>
+                  <p className="text-xs text-gray-400 mt-1 truncate">
+                    {unit.tenant_name ? `Tenant: ${unit.tenant_name}` : unit.landlord_name ? `Landlord: ${unit.landlord_name}` : 'No active tenant'}
+                  </p>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
     </div>
   );
 }

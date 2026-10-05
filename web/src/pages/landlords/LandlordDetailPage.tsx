@@ -9,7 +9,7 @@ import { toast } from '../../components/ui/toaster';
 const C = 'bg-white rounded-2xl border border-gray-100 shadow-sm';
 const inputCls = "w-full px-3.5 py-2.5 rounded-lg border border-gray-200 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition placeholder-gray-400";
 
-type Tab = 'properties' | 'collections' | 'statements';
+type Tab = 'properties' | 'units' | 'collections' | 'statements';
 
 // ─── Commission Override Modal ────────────────────────────────────────────────
 
@@ -114,6 +114,7 @@ export default function LandlordDetailPage() {
 
   const landlord   = data?.landlord;
   const properties = data?.properties ?? [];
+  const units      = data?.units ?? [];
   const monthStats = data?.monthStats;
 
   if (isLoading) return (
@@ -188,6 +189,7 @@ export default function LandlordDetailPage() {
       <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
         {([
           { k: 'properties',  label: '🏢 Properties' },
+          { k: 'units',       label: `🔑 Units (${units.length})` },
           { k: 'collections', label: '💰 Collections' },
           { k: 'statements',  label: '📄 Statements' },
         ] as const).map(t => (
@@ -256,6 +258,61 @@ export default function LandlordDetailPage() {
                 ))}
               </tbody>
             </table>
+          )}
+        </div>
+      )}
+
+      {/* Units Tab */}
+      {tab === 'units' && (
+        <div className={`${C} overflow-hidden`}>
+          {units.length === 0 ? (
+            <div className="p-10 text-center text-gray-400 text-sm">
+              No units are linked to this landlord yet. Assign this landlord to a property to include its units.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[700px]">
+                <thead>
+                  <tr className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider border-b border-gray-100">
+                    <th className="px-5 py-3">Unit</th>
+                    <th className="px-5 py-3">Property</th>
+                    <th className="px-5 py-3">Tenant</th>
+                    <th className="px-5 py-3">Status</th>
+                    <th className="px-5 py-3 text-right">Monthly rent</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {units.map((unit: any) => (
+                    <tr key={unit.id} className="hover:bg-gray-50 transition">
+                      <td className="px-5 py-3.5">
+                        <p className="font-semibold text-sm text-gray-900">{unit.unit_number}</p>
+                        <p className="text-xs text-gray-400">
+                          {[unit.unit_type, unit.floor_number !== null ? `Floor ${unit.floor_number}` : null]
+                            .filter(Boolean).join(' · ') || '—'}
+                        </p>
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <button onClick={() => navigate(`/properties/${unit.property_id}`)}
+                          className="text-sm font-medium text-teal-700 hover:text-teal-800">
+                          {unit.property_name}
+                        </button>
+                      </td>
+                      <td className="px-5 py-3.5 text-sm text-gray-600">{unit.tenant_name ?? '—'}</td>
+                      <td className="px-5 py-3.5">
+                        <span className={`text-xs font-semibold px-2 py-1 rounded-full ${
+                          unit.is_occupied ? 'bg-emerald-50 text-emerald-700' : unit.is_active ? 'bg-amber-50 text-amber-700' : 'bg-gray-100 text-gray-600'
+                        }`}>
+                          {unit.is_occupied ? 'Occupied' : unit.is_active ? 'Vacant' : 'Inactive'}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3.5 text-right text-sm text-gray-700">
+                        {unit.monthly_rent ? `KES ${Number(unit.monthly_rent).toLocaleString()}` : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       )}

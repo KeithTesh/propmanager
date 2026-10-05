@@ -12,6 +12,7 @@ const SetupWizard        = lazy(() => import('./pages/setup/SetupWizard'));
 const DashboardLayout    = lazy(() => import('./components/layout/DashboardLayout'));
 const DashboardHome      = lazy(() => import('./pages/dashboard/DashboardHome'));
 const PropertiesPage     = lazy(() => import('./pages/properties/PropertiesPage'));
+const UnitsPage          = lazy(() => import('./pages/properties/UnitsPage'));
 const PropertyDetailPage = lazy(() => import('./pages/properties/PropertyDetailPage'));
 const TenantsPage        = lazy(() => import('./pages/tenants/TenantsPage'));
 const LeasesPage         = lazy(() => import('./pages/leases/LeasesPage'));
@@ -109,6 +110,7 @@ export function AppRouter() {
               <Route element={<DashboardLayout />}>
                 <Route path="/dashboard"      element={<SuperAdminRoute />} />
                 <Route path="/properties"     element={<PropertiesPage />} />
+                <Route path="/units"          element={<UnitsPage />} />
                 <Route path="/properties/:id" element={<PropertyDetailPage />} />
                 <Route path="/tenants"        element={<TenantsPage />} />
                 <Route path="/leases"         element={<LeasesPage />} />

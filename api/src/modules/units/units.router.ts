@@ -34,6 +34,7 @@ const UnitSchema = z.object({
 
 unitsRouter.get('/', async (req: Request, res: Response) => {
   const { propertyId } = req.query;
+  const limit = z.coerce.number().int().min(1).max(100).optional().parse(req.query.limit);
 
   const units = await withRLS(ctx(req), async (db) => {
     if (propertyId) {
@@ -45,9 +46,15 @@ unitsRouter.get('/', async (req: Request, res: Response) => {
           l.monthly_rent,
           l.status        AS lease_status,
           t.full_name     AS tenant_name,
-          t.phone         AS tenant_phone
+          t.phone         AS tenant_phone,
+          p.name          AS property_name,
+          p.landlord_id,
+          landlord.full_name AS landlord_name
         FROM units u
-        LEFT JOIN leases l ON l.unit_id = u.id AND l.status = 'active'
+        JOIN properties p ON p.id = u.property_id AND p.company_id = u.company_id
+        LEFT JOIN landlords landlord ON landlord.id = p.landlord_id
+          AND landlord.company_id = u.company_id AND landlord.deleted_at IS NULL
+        LEFT JOIN leases l ON l.unit_id = u.id AND l.company_id = u.company_id AND l.status = 'active'
         LEFT JOIN tenants t ON t.id = l.primary_tenant_id
         WHERE u.property_id = ${propertyId as string}
           AND u.deleted_at IS NULL
@@ -56,13 +63,26 @@ unitsRouter.get('/', async (req: Request, res: Response) => {
     }
     const statusFilter = req.query.status;
     return db`
-      SELECT u.*, p.name AS property_name
+      SELECT
+        u.*,
+        p.name AS property_name,
+        p.landlord_id,
+        landlord.full_name AS landlord_name,
+        l.id AS lease_id,
+        l.monthly_rent,
+        l.status AS lease_status,
+        t.full_name AS tenant_name,
+        t.phone AS tenant_phone
       FROM units u
-      JOIN properties p ON p.id = u.property_id
+      JOIN properties p ON p.id = u.property_id AND p.company_id = u.company_id
+      LEFT JOIN landlords landlord ON landlord.id = p.landlord_id
+        AND landlord.company_id = u.company_id AND landlord.deleted_at IS NULL
+      LEFT JOIN leases l ON l.unit_id = u.id AND l.company_id = u.company_id AND l.status = 'active'
+      LEFT JOIN tenants t ON t.id = l.primary_tenant_id
       WHERE u.deleted_at IS NULL
         ${statusFilter === 'vacant'   ? db`AND u.is_occupied = false AND u.is_active = true` : db``}
         ${statusFilter === 'occupied' ? db`AND u.is_occupied = true` : db``}
-      ORDER BY p.name, u.unit_number
+      ${limit ? db`ORDER BY u.created_at DESC LIMIT ${limit}` : db`ORDER BY p.name, u.unit_number`}
     `;
   });
 

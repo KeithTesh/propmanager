@@ -143,6 +143,26 @@ landlordsRouter.get('/:id', async (req: Request, res: Response) => {
     ORDER BY p.name
   `);
 
+  const units = await withRLS(c, async (db) => db`
+    SELECT
+      u.id, u.unit_number, u.unit_type, u.floor_number,
+      u.is_occupied, u.is_active,
+      p.id AS property_id, p.name AS property_name,
+      l.monthly_rent, t.full_name AS tenant_name
+    FROM units u
+    JOIN properties p ON p.id = u.property_id AND p.company_id = ${c.companyId}
+    LEFT JOIN leases l ON l.unit_id = u.id
+      AND l.company_id = ${c.companyId} AND l.status = 'active'
+    LEFT JOIN tenants t ON t.id = l.primary_tenant_id
+      AND t.company_id = ${c.companyId}
+    WHERE p.landlord_id = ${id}
+      AND p.company_id = ${c.companyId}
+      AND p.deleted_at IS NULL
+      AND u.company_id = ${c.companyId}
+      AND u.deleted_at IS NULL
+    ORDER BY p.name, u.unit_number
+  `);
+
   // This month summary
   const [monthStats] = await withRLS(c, async (db) => db`
     SELECT
@@ -159,7 +179,7 @@ landlordsRouter.get('/:id', async (req: Request, res: Response) => {
     WHERE p.landlord_id = ${id} AND p.company_id = ${c.companyId} AND p.deleted_at IS NULL
   `);
 
-  res.json({ success: true, data: { landlord, properties, monthStats } } satisfies ApiResponse<unknown>);
+  res.json({ success: true, data: { landlord, properties, units, monthStats } } satisfies ApiResponse<unknown>);
 });
 
 // ── POST /landlords ───────────────────────────────────────────────────────────
