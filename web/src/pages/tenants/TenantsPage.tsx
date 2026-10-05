@@ -11,6 +11,7 @@ interface Tenant {
   national_id: string | null; is_corporate: boolean; company_name: string | null;
   notes: string | null; notify_sms: boolean; notify_email: boolean;
   active_leases: string; unit_number: string | null; property_name: string | null;
+  unit_summary: string | null;
   created_at: string; user_id: string | null;
 }
 
@@ -123,8 +124,8 @@ function TenantCard({ t, onEdit, onArchive, onInvite }: {
             <svg className="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75" />
             </svg>
-            <span className="text-xs text-gray-500 truncate">
-              Unit {t.unit_number}{t.property_name ? ` · ${t.property_name}` : ''}
+            <span className="text-xs text-gray-500 break-words">
+              {t.unit_summary ?? `Unit ${t.unit_number}${t.property_name ? ` · ${t.property_name}` : ''}`}
             </span>
           </div>
         )}

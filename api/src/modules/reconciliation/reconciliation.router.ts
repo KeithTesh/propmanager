@@ -1,15 +1,43 @@
 // api/src/modules/reconciliation/reconciliation.router.ts
 
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { randomUUID } from 'crypto';
+import multer from 'multer';
 import { withRLS, withRLSTransaction } from '../../db';
 import { authenticate } from '../../middleware/auth';
 import { logger } from '../../lib/logger';
 import type { ApiResponse, RLSContext } from '../../types';
+import { parseStatementFile, StatementFileError } from './statement-file';
 
 export const reconciliationRouter = Router();
 reconciliationRouter.use(authenticate);
+
+const statementUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+});
+
+function uploadStatementFile(req: Request, res: Response, next: NextFunction): void {
+  statementUpload.single('file')(req, res, error => {
+    if (error instanceof multer.MulterError) {
+      const tooLarge = error.code === 'LIMIT_FILE_SIZE';
+      res.status(tooLarge ? 413 : 400).json({
+        success: false,
+        error: {
+          code: tooLarge ? 'FILE_TOO_LARGE' : 'INVALID_FILE_UPLOAD',
+          message: tooLarge ? 'Files must be 10 MB or smaller.' : error.message,
+        },
+      });
+      return;
+    }
+    if (error) {
+      next(error);
+      return;
+    }
+    next();
+  });
+}
 
 function ctx(req: Request): RLSContext {
   return { companyId: req.ctx.companyId!, userId: req.ctx.userId, userRole: req.ctx.userRole };
@@ -53,8 +81,26 @@ reconciliationRouter.get('/unmatched', async (req: Request, res: Response) => {
   res.json({ success: true, data: { unmatched } } satisfies ApiResponse<unknown>);
 });
 
-// ─── POST /reconciliation/import — upload + parse CSV ────────────────────────
+// ─── POST /reconciliation/import — process parsed statement rows ─────────────
 // Body: { bankName, filename, fileHash, rows: [{date, ref, amount, payer, phone}] }
+
+reconciliationRouter.post('/parse', uploadStatementFile, async (req: Request, res: Response) => {
+  if (!req.file) {
+    res.status(400).json({ success: false, error: { code: 'FILE_REQUIRED', message: 'Choose a CSV or Excel (.xlsx) file.' } });
+    return;
+  }
+
+  try {
+    const rows = await parseStatementFile(req.file.originalname, req.file.buffer);
+    res.json({ success: true, data: { rows } } satisfies ApiResponse<unknown>);
+  } catch (error) {
+    if (error instanceof StatementFileError) {
+      res.status(400).json({ success: false, error: { code: 'INVALID_STATEMENT_FILE', message: error.message } });
+      return;
+    }
+    throw error;
+  }
+});
 
 const ImportRowSchema = z.object({
   transactionDate: z.string(),

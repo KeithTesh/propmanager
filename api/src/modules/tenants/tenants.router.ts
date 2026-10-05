@@ -46,11 +46,15 @@ tenantsRouter.get('/', async (req: Request, res: Response) => {
           t.*,
           COUNT(l.id) FILTER (WHERE l.status = 'active') AS active_leases,
           MAX(u.unit_number)  AS unit_number,
-          MAX(p.name)         AS property_name
+          MAX(p.name)         AS property_name,
+          STRING_AGG(
+            DISTINCT 'Unit ' || u.unit_number || CASE WHEN p.name IS NOT NULL THEN ' · ' || p.name ELSE '' END,
+            ', '
+          ) FILTER (WHERE l.status = 'active') AS unit_summary
         FROM tenants t
-        LEFT JOIN leases l ON l.primary_tenant_id = t.id
-        LEFT JOIN units u  ON u.id = l.unit_id AND l.status = 'active'
-        LEFT JOIN properties p ON p.id = u.property_id
+        LEFT JOIN leases l ON l.primary_tenant_id = t.id AND l.company_id = ${req.ctx.companyId}
+        LEFT JOIN units u  ON u.id = l.unit_id AND u.company_id = ${req.ctx.companyId} AND l.status = 'active'
+        LEFT JOIN properties p ON p.id = u.property_id AND p.company_id = ${req.ctx.companyId}
         WHERE t.company_id = ${req.ctx.companyId}
           AND t.deleted_at IS NULL
           AND (
@@ -68,11 +72,15 @@ tenantsRouter.get('/', async (req: Request, res: Response) => {
         t.*,
         COUNT(l.id) FILTER (WHERE l.status = 'active') AS active_leases,
         MAX(u.unit_number)  AS unit_number,
-        MAX(p.name)         AS property_name
+        MAX(p.name)         AS property_name,
+        STRING_AGG(
+          DISTINCT 'Unit ' || u.unit_number || CASE WHEN p.name IS NOT NULL THEN ' · ' || p.name ELSE '' END,
+          ', '
+        ) FILTER (WHERE l.status = 'active') AS unit_summary
       FROM tenants t
-      LEFT JOIN leases l ON l.primary_tenant_id = t.id
-      LEFT JOIN units u  ON u.id = l.unit_id AND l.status = 'active'
-      LEFT JOIN properties p ON p.id = u.property_id
+      LEFT JOIN leases l ON l.primary_tenant_id = t.id AND l.company_id = ${req.ctx.companyId}
+      LEFT JOIN units u  ON u.id = l.unit_id AND u.company_id = ${req.ctx.companyId} AND l.status = 'active'
+      LEFT JOIN properties p ON p.id = u.property_id AND p.company_id = ${req.ctx.companyId}
       WHERE t.company_id = ${req.ctx.companyId}
         AND t.deleted_at IS NULL
       GROUP BY t.id

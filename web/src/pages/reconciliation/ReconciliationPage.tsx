@@ -36,16 +36,6 @@ const BANK_COLUMNS: Record<string, { date: string; ref: string; amount: string; 
   'Custom':       { date: 'date',        ref: 'ref',              amount: 'amount',        payer: 'payer', phone: 'phone' },
 };
 
-function parseCSV(text: string): Record<string, string>[] {
-  const lines = text.trim().split(/\r?\n/);
-  if (lines.length < 2) return [];
-  const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
-  return lines.slice(1).map(line => {
-    const vals = line.split(',').map(v => v.trim().replace(/^"|"$/g, ''));
-    return Object.fromEntries(headers.map((h, i) => [h, vals[i] ?? '']));
-  });
-}
-
 export default function ReconciliationPage() {
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -55,6 +45,7 @@ export default function ReconciliationPage() {
   const [colMap,     setColMap]     = useState<Record<string, string>>({});
   const [filename,   setFilename]   = useState('');
   const [fileHash,   setFileHash]   = useState('');
+  const [parsing,    setParsing]    = useState(false);
   const [importing,  setImporting]  = useState(false);
   const [importResult, setImportResult] = useState<{ matched: number; unmatched: number; duplicates: number } | null>(null);
   const [error, setError] = useState('');
@@ -65,22 +56,28 @@ export default function ReconciliationPage() {
   const { data: batches }   = useQuery({ queryKey: ['csv-batches'],   queryFn: async () => (await apiClient.get<any>('/reconciliation/batches')).data.data.batches, enabled: tab === 'history' });
   const { data: unmatched } = useQuery({ queryKey: ['unmatched'],     queryFn: async () => (await apiClient.get<any>('/reconciliation/unmatched')).data.data.unmatched, enabled: tab === 'unmatched' });
 
-  function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+  async function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     setFilename(file.name);
     setError(''); setImportResult(null);
-    const reader = new FileReader();
-    reader.onload = async (ev) => {
-      const text = ev.target?.result as string;
-      // Hash for duplicate detection
-      const encoder = new TextEncoder();
-      const data = encoder.encode(text);
-      const hashBuf = await crypto.subtle.digest('SHA-256', data);
+    setCsvRows([]);
+    setColMap({});
+    setParsing(true);
+    try {
+      const contents = await file.arrayBuffer();
+      const hashBuf = await crypto.subtle.digest('SHA-256', contents);
       const hashArr = Array.from(new Uint8Array(hashBuf));
       setFileHash(hashArr.map(b => b.toString(16).padStart(2, '0')).join(''));
 
-      const rows = parseCSV(text);
+      const formData = new FormData();
+      formData.append('file', file);
+      const response = await apiClient.post<{ data: { rows: Record<string, string>[] } }>(
+        '/reconciliation/parse',
+        formData,
+        { headers: { 'Content-Type': 'multipart/form-data' } }
+      );
+      const rows = response.data.data.rows;
       setCsvRows(rows);
 
       // Auto-detect column mapping for known banks
@@ -97,12 +94,16 @@ export default function ReconciliationPage() {
         };
         setColMap(mapped);
       }
-    };
-    reader.readAsText(file);
+    } catch (e) {
+      setFileHash('');
+      setError(getApiErrorMessage(e));
+    } finally {
+      setParsing(false);
+    }
   }
 
   async function runImport() {
-    if (!csvRows.length) { setError('Upload a CSV file first'); return; }
+    if (!csvRows.length) { setError('Upload a CSV or Excel (.xlsx) file first'); return; }
     setImporting(true); setError(''); setImportResult(null);
     try {
       const rows = csvRows.map(row => ({
@@ -114,6 +115,10 @@ export default function ReconciliationPage() {
         payerPhone:      row[colMap.payerPhone]      || null,
         bankName:        bankName,
       })).filter(r => r.amount > 0 && r.transactionDate);
+      if (!rows.length) {
+        setError('No valid transactions found. Check the date and amount column mappings.');
+        return;
+      }
 
       const res = await apiClient.post<{ data: { matched: number; unmatched: number; duplicates: number } }>(
         '/reconciliation/import',
@@ -158,7 +163,7 @@ export default function ReconciliationPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 mb-6 bg-gray-100 rounded-xl p-1 w-fit">
-        {([['import','Import CSV'],['unmatched',`Unmatched${unmatched?.length ? ` (${unmatched.length})` : ''}`],['history','History']] as const).map(([k, label]) => (
+        {([['import','Import Statement'],['unmatched',`Unmatched${unmatched?.length ? ` (${unmatched.length})` : ''}`],['history','History']] as const).map(([k, label]) => (
           <button key={k} onClick={() => setTab(k)}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition whitespace-nowrap
               ${tab === k ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
@@ -197,13 +202,13 @@ export default function ReconciliationPage() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">CSV File</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Statement File</label>
                 <div
                   onClick={() => fileRef.current?.click()}
                   className="w-full px-3.5 py-2.5 rounded-lg border-2 border-dashed border-gray-200 text-sm text-gray-500 cursor-pointer hover:border-teal-400 hover:text-teal-600 transition text-center">
-                  {filename || 'Click to upload CSV…'}
+                  {parsing ? 'Reading file…' : filename || 'Click to upload CSV or Excel (.xlsx)…'}
                 </div>
-                <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={onFileChange} />
+                <input ref={fileRef} type="file" accept=".csv,.xlsx" className="hidden" onChange={onFileChange} />
               </div>
             </div>
 
@@ -257,11 +262,11 @@ export default function ReconciliationPage() {
             )}
 
             <div className="flex justify-end">
-              <button onClick={runImport} disabled={importing || !csvRows.length}
+              <button onClick={runImport} disabled={importing || parsing || !csvRows.length}
                 className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-60 transition"
                 style={{ background: '#0d9f9f' }}>
                 {importing && <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>}
-                {importing ? 'Importing…' : `Import ${csvRows.length > 0 ? csvRows.length + ' rows' : 'CSV'}`}
+                {importing ? 'Importing…' : `Import ${csvRows.length > 0 ? csvRows.length + ' rows' : 'file'}`}
               </button>
             </div>
           </div>
