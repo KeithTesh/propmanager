@@ -87,7 +87,7 @@ landlordsRouter.get('/', async (req: Request, res: Response) => {
       -- This month collections
       COALESCE(SUM(pay.amount) FILTER (
         WHERE pay.created_at >= DATE_TRUNC('month', NOW())
-          AND pay.status = 'confirmed'
+          AND pay.undone_at IS NULL
       ), 0)                                                    AS collected_this_month
 
     FROM landlords l
@@ -148,7 +148,7 @@ landlordsRouter.get('/:id', async (req: Request, res: Response) => {
     SELECT
       COALESCE(SUM(b.amount), 0)                              AS total_billed,
       COALESCE(SUM(pay.amount) FILTER (
-        WHERE pay.status = 'confirmed'
+        WHERE pay.undone_at IS NULL
       ), 0)                                                   AS total_collected
     FROM properties p
     JOIN units u          ON u.property_id = p.id AND u.deleted_at IS NULL
@@ -348,7 +348,7 @@ landlordsRouter.get('/:id/portfolio', async (req: Request, res: Response) => {
         WHERE DATE_TRUNC('month', b.due_date) = DATE_TRUNC('month', NOW())
       ), 0)                                                       AS billed_this_month,
       COALESCE(SUM(pay.amount) FILTER (
-        WHERE pay.status = 'confirmed'
+        WHERE pay.undone_at IS NULL
           AND DATE_TRUNC('month', pay.created_at) = DATE_TRUNC('month', NOW())
       ), 0)                                                       AS collected_this_month,
       co.commission_type  AS override_type,
